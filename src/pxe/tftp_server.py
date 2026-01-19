@@ -1,7 +1,16 @@
 """TFTP server implementation (RFC 1350, 2347, 2348)."""
+import asyncio
+import logging
 import struct
 from dataclasses import dataclass, field
 from enum import IntEnum
+from pathlib import Path
+from typing import AsyncIterator
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_BLKSIZE = 512
+MAX_BLKSIZE = 65464
 
 
 class OpCode(IntEnum):
@@ -116,3 +125,52 @@ class TFTPPacket:
         for key, value in options.items():
             packet += key.encode("ascii") + b"\x00" + value.encode("ascii") + b"\x00"
         return packet
+
+
+class TFTPHandler:
+    """Handles TFTP file operations."""
+
+    def __init__(self, root: Path):
+        """Initialize handler with TFTP root directory."""
+        self.root = Path(root).resolve()
+
+    def _resolve_path(self, filename: str) -> Path:
+        """Resolve filename to safe path within root."""
+        # Normalize and resolve
+        requested = (self.root / filename).resolve()
+
+        # Ensure path is within root (prevent directory traversal)
+        if not str(requested).startswith(str(self.root)):
+            raise PermissionError(f"Access denied: {filename}")
+
+        return requested
+
+    async def read_file(
+        self, filename: str, blksize: int = DEFAULT_BLKSIZE
+    ) -> AsyncIterator[bytes]:
+        """Read file in chunks for TFTP transfer."""
+        filepath = self._resolve_path(filename)
+
+        if not filepath.exists():
+            raise FileNotFoundError(f"File not found: {filename}")
+
+        if not filepath.is_file():
+            raise PermissionError(f"Not a file: {filename}")
+
+        blksize = min(blksize, MAX_BLKSIZE)
+
+        # Read file in chunks
+        loop = asyncio.get_event_loop()
+        with open(filepath, "rb") as f:
+            while True:
+                chunk = await loop.run_in_executor(None, f.read, blksize)
+                if not chunk:
+                    break
+                yield chunk
+
+    def get_file_size(self, filename: str) -> int:
+        """Get file size for tsize option."""
+        filepath = self._resolve_path(filename)
+        if not filepath.exists():
+            raise FileNotFoundError(f"File not found: {filename}")
+        return filepath.stat().st_size

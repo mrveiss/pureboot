@@ -1,6 +1,9 @@
 """Tests for TFTP server."""
+import asyncio
+from pathlib import Path
+
 import pytest
-from src.pxe.tftp_server import TFTPPacket, OpCode
+from src.pxe.tftp_server import TFTPPacket, OpCode, TFTPHandler
 
 
 class TestTFTPPacketParsing:
@@ -49,3 +52,56 @@ class TestTFTPPacketParsing:
 
         assert packet[:2] == b"\x00\x06"  # OACK opcode
         assert b"blksize\x001024\x00" in packet
+
+
+class TestTFTPHandler:
+    """Test TFTP file handling."""
+
+    @pytest.fixture
+    def tftp_root(self, tmp_path: Path) -> Path:
+        """Create a temporary TFTP root."""
+        bios_dir = tmp_path / "bios"
+        bios_dir.mkdir()
+        (bios_dir / "test.bin").write_bytes(b"X" * 1000)
+        return tmp_path
+
+    @pytest.mark.asyncio
+    async def test_read_file_success(self, tftp_root: Path):
+        """Read a file that exists."""
+        handler = TFTPHandler(tftp_root)
+        chunks = []
+
+        async for chunk in handler.read_file("bios/test.bin"):
+            chunks.append(chunk)
+
+        assert b"".join(chunks) == b"X" * 1000
+
+    @pytest.mark.asyncio
+    async def test_read_file_not_found(self, tftp_root: Path):
+        """Error when file doesn't exist."""
+        handler = TFTPHandler(tftp_root)
+
+        with pytest.raises(FileNotFoundError):
+            async for _ in handler.read_file("nonexistent.bin"):
+                pass
+
+    @pytest.mark.asyncio
+    async def test_read_file_directory_traversal_blocked(self, tftp_root: Path):
+        """Block directory traversal attempts."""
+        handler = TFTPHandler(tftp_root)
+
+        with pytest.raises(PermissionError):
+            async for _ in handler.read_file("../../../etc/passwd"):
+                pass
+
+    @pytest.mark.asyncio
+    async def test_read_file_with_blksize(self, tftp_root: Path):
+        """Respect blksize option."""
+        handler = TFTPHandler(tftp_root)
+        chunks = []
+
+        async for chunk in handler.read_file("bios/test.bin", blksize=256):
+            chunks.append(chunk)
+            assert len(chunk) <= 256
+
+        assert len(chunks) == 4  # 1000 bytes / 256 = 4 chunks
