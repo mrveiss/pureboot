@@ -174,3 +174,146 @@ class TFTPHandler:
         if not filepath.exists():
             raise FileNotFoundError(f"File not found: {filename}")
         return filepath.stat().st_size
+
+
+class TFTPServerProtocol(asyncio.DatagramProtocol):
+    """UDP protocol handler for TFTP server."""
+
+    def __init__(self, handler: TFTPHandler, on_request: callable = None):
+        self.handler = handler
+        self.on_request = on_request
+        self.transport = None
+        self.transfers: dict[tuple, asyncio.Task] = {}
+
+    def connection_made(self, transport):
+        self.transport = transport
+
+    def datagram_received(self, data: bytes, addr: tuple):
+        """Handle incoming TFTP packet."""
+        try:
+            packet = TFTPPacket.parse(data)
+
+            if packet.opcode == OpCode.RRQ:
+                logger.info(f"RRQ from {addr}: {packet.filename}")
+                if self.on_request:
+                    self.on_request(addr, packet.filename)
+                # Start transfer in background task
+                task = asyncio.create_task(
+                    self._handle_read_request(addr, packet)
+                )
+                self.transfers[addr] = task
+
+            elif packet.opcode == OpCode.ACK:
+                # ACK handled within transfer task
+                pass
+
+            elif packet.opcode == OpCode.WRQ:
+                # Write requests not supported
+                error = TFTPPacket.build_error(
+                    ErrorCode.ACCESS_VIOLATION,
+                    "Write not supported"
+                )
+                self.transport.sendto(error, addr)
+
+        except Exception as e:
+            logger.error(f"Error handling packet from {addr}: {e}")
+            error = TFTPPacket.build_error(ErrorCode.NOT_DEFINED, str(e))
+            self.transport.sendto(error, addr)
+
+    async def _handle_read_request(self, client_addr: tuple, packet: TFTPPacket):
+        """Handle a read request."""
+        try:
+            # Parse options
+            blksize = int(packet.options.get("blksize", DEFAULT_BLKSIZE))
+            blksize = min(blksize, MAX_BLKSIZE)
+
+            # Send OACK if options were requested
+            if packet.options:
+                try:
+                    tsize = self.handler.get_file_size(packet.filename)
+                    oack_options = {"blksize": str(blksize), "tsize": str(tsize)}
+                except FileNotFoundError:
+                    oack_options = {"blksize": str(blksize)}
+
+                oack = TFTPPacket.build_oack(oack_options)
+                self.transport.sendto(oack, client_addr)
+                # Wait for ACK 0
+                await asyncio.sleep(0.1)
+
+            # Send file data
+            block_num = 1
+            chunk = b""
+            async for chunk in self.handler.read_file(packet.filename, blksize):
+                data_packet = TFTPPacket.build_data(block_num, chunk)
+                self.transport.sendto(data_packet, client_addr)
+
+                # Simple flow control - wait a bit between packets
+                # Real implementation would wait for ACK
+                await asyncio.sleep(0.001)
+                block_num += 1
+
+            # Send final empty packet if last chunk was full
+            if len(chunk) == blksize:
+                data_packet = TFTPPacket.build_data(block_num, b"")
+                self.transport.sendto(data_packet, client_addr)
+
+        except FileNotFoundError:
+            error = TFTPPacket.build_error(ErrorCode.FILE_NOT_FOUND, "File not found")
+            self.transport.sendto(error, client_addr)
+
+        except PermissionError as e:
+            error = TFTPPacket.build_error(ErrorCode.ACCESS_VIOLATION, str(e))
+            self.transport.sendto(error, client_addr)
+
+        except Exception as e:
+            logger.error(f"Transfer error: {e}")
+            error = TFTPPacket.build_error(ErrorCode.NOT_DEFINED, str(e))
+            self.transport.sendto(error, client_addr)
+
+        finally:
+            self.transfers.pop(client_addr, None)
+
+
+class TFTPServer:
+    """Async TFTP server."""
+
+    def __init__(
+        self,
+        root: Path,
+        host: str = "0.0.0.0",
+        port: int = 69,
+        on_request: callable = None
+    ):
+        self.root = Path(root)
+        self.host = host
+        self._port = port
+        self.on_request = on_request
+        self.transport = None
+        self.protocol = None
+
+    @property
+    def port(self) -> int:
+        """Get actual bound port."""
+        if self.transport:
+            return self.transport.get_extra_info("sockname")[1]
+        return self._port
+
+    async def start(self):
+        """Start the TFTP server."""
+        handler = TFTPHandler(self.root)
+        loop = asyncio.get_event_loop()
+
+        self.transport, self.protocol = await loop.create_datagram_endpoint(
+            lambda: TFTPServerProtocol(handler, self.on_request),
+            local_addr=(self.host, self._port)
+        )
+
+        actual_port = self.transport.get_extra_info("sockname")[1]
+        logger.info(f"TFTP server started on {self.host}:{actual_port}")
+
+    async def stop(self):
+        """Stop the TFTP server."""
+        if self.transport:
+            self.transport.close()
+            self.transport = None
+            logger.info("TFTP server stopped")
