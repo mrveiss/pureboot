@@ -27,6 +27,18 @@ class BootMenuSettings(BaseSettings):
     logo_url: str = "/assets/pureboot-logo.png"
 
 
+class DatabaseSettings(BaseSettings):
+    """Database settings."""
+    url: str = "sqlite+aiosqlite:///./pureboot.db"
+    echo: bool = False  # Log SQL statements
+
+
+class RegistrationSettings(BaseSettings):
+    """Node registration settings."""
+    auto_register: bool = True  # Auto-register unknown MACs
+    default_group_id: str | None = None  # Default group for new nodes
+
+
 class Settings(BaseSettings):
     """Main application settings."""
     model_config = SettingsConfigDict(
@@ -41,6 +53,8 @@ class Settings(BaseSettings):
     tftp: TFTPSettings = Field(default_factory=TFTPSettings)
     dhcp_proxy: DHCPProxySettings = Field(default_factory=DHCPProxySettings)
     boot_menu: BootMenuSettings = Field(default_factory=BootMenuSettings)
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    registration: RegistrationSettings = Field(default_factory=RegistrationSettings)
 
 
 settings = Settings()
