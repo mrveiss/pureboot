@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from src.api.routes import boot
+from src.api.routes import boot, ipxe
 from src.config import settings
 
 logging.basicConfig(level=logging.INFO)
@@ -33,6 +33,7 @@ app = FastAPI(
 
 # Mount API routes
 app.include_router(boot.router, prefix="/api/v1", tags=["boot"])
+app.include_router(ipxe.router, prefix="/api/v1", tags=["ipxe"])
 
 
 @app.get("/health")
