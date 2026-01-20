@@ -81,10 +81,21 @@ install_system_packages() {
         log_info "Installing Python 3.11 from deadsnakes PPA..."
         # Ensure add-apt-repository works properly
         apt-get install -y -qq software-properties-common > /dev/null
+
+        # Remove and re-add PPA to ensure fresh state
+        add-apt-repository --remove -y ppa:deadsnakes/ppa > /dev/null 2>&1 || true
         DEBIAN_FRONTEND=noninteractive add-apt-repository -y ppa:deadsnakes/ppa
-        apt-get update -qq
+
+        # Full apt update to refresh package lists
+        apt-get update
+
+        # Show available python3.11 packages for debugging
+        log_info "Searching for python3.11 packages..."
+        apt-cache search python3.11 | head -5 || true
+
         if ! apt-get install -y python3.11 python3.11-venv python3.11-dev; then
-            log_error "Failed to install Python 3.11. Please check your internet connection and try again."
+            log_error "Failed to install Python 3.11."
+            log_error "Try running: sudo apt-get update && sudo apt-cache search python3.11"
             exit 1
         fi
         PYTHON_CMD="python3.11"
