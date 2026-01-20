@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from src.api.routes import boot, ipxe, nodes, groups, storage, files
+from src.api.routes import boot, ipxe, nodes, groups, storage, files, luns
 from src.db.database import init_db, close_db
 from src.config import settings
 from src.pxe.tftp_server import TFTPServer
@@ -105,6 +105,7 @@ app.include_router(nodes.router, prefix="/api/v1", tags=["nodes"])
 app.include_router(groups.router, prefix="/api/v1", tags=["groups"])
 app.include_router(storage.router, prefix="/api/v1", tags=["storage"])
 app.include_router(files.router, prefix="/api/v1", tags=["files"])
+app.include_router(luns.router, prefix="/api/v1", tags=["luns"])
 
 # Mount static files for assets (if directory exists)
 assets_dir = Path("assets")
