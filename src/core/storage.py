@@ -55,7 +55,11 @@ class NfsBackendService:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await proc.communicate()
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+            except asyncio.TimeoutError:
+                proc.kill()
+                return False, "Connection test timed out"
 
             if proc.returncode != 0:
                 return False, f"Cannot reach NFS server: {stderr.decode().strip()}"
@@ -90,7 +94,12 @@ class NfsBackendService:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            _, stderr = await proc.communicate()
+            try:
+                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+            except asyncio.TimeoutError:
+                proc.kill()
+                logger.error("NFS mount timed out")
+                return None
 
             if proc.returncode != 0:
                 logger.error(f"NFS mount failed: {stderr.decode()}")
@@ -110,7 +119,11 @@ class NfsBackendService:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                await proc.communicate()
+                try:
+                    await asyncio.wait_for(proc.communicate(), timeout=10)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    logger.error("NFS unmount timed out")
             except Exception as e:
                 logger.error(f"NFS unmount error: {e}")
 
