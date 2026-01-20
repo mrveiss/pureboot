@@ -95,3 +95,33 @@ class NodeTag(Base):
     node: Mapped[Node] = relationship(back_populates="tags")
 
     __table_args__ = (UniqueConstraint("node_id", "tag", name="uq_node_tag"),)
+
+
+class StorageBackend(Base):
+    """Storage backend configuration (NFS, iSCSI, S3, HTTP)."""
+
+    __tablename__ = "storage_backends"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    type: Mapped[str] = mapped_column(String(10), nullable=False)  # nfs, iscsi, s3, http
+    status: Mapped[str] = mapped_column(String(10), default="offline")  # online, offline, error
+
+    # Type-specific config stored as JSON
+    config_json: Mapped[str] = mapped_column(String(2000), nullable=False)
+
+    # Cached stats (updated periodically)
+    used_bytes: Mapped[int] = mapped_column(default=0)
+    total_bytes: Mapped[int | None] = mapped_column(nullable=True)
+    file_count: Mapped[int] = mapped_column(default=0)
+
+    # Mount point for NFS (set when mounted)
+    mount_point: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        default=func.now(), onupdate=func.now()
+    )
