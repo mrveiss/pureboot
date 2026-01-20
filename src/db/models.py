@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import ForeignKey, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -106,11 +106,11 @@ class StorageBackend(Base):
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    type: Mapped[str] = mapped_column(String(10), nullable=False)  # nfs, iscsi, s3, http
-    status: Mapped[str] = mapped_column(String(10), default="offline")  # online, offline, error
+    type: Mapped[str] = mapped_column(String(10), index=True, nullable=False)  # nfs, iscsi, s3, http
+    status: Mapped[str] = mapped_column(String(10), index=True, default="offline")  # online, offline, error
 
     # Type-specific config stored as JSON
-    config_json: Mapped[str] = mapped_column(String(2000), nullable=False)
+    config_json: Mapped[str] = mapped_column(Text, nullable=False)
 
     # Cached stats (updated periodically)
     used_bytes: Mapped[int] = mapped_column(default=0)
