@@ -105,7 +105,11 @@ install_system_packages() {
     fi
 
     # Install Node.js 18+ from NodeSource if needed
-    CURRENT_NODE=$(node --version 2>&1 | cut -d'v' -f2 | cut -d'.' -f1 2>/dev/null || echo "0")
+    if command -v node &> /dev/null; then
+        CURRENT_NODE=$(node --version | cut -d'v' -f2 | cut -d'.' -f1)
+    else
+        CURRENT_NODE=0
+    fi
     if [ "$CURRENT_NODE" -lt 18 ]; then
         log_info "Installing Node.js 18 from NodeSource..."
 
@@ -151,7 +155,11 @@ check_python_version() {
 }
 
 check_node_version() {
-    NODE_VERSION=$(node --version 2>&1 | cut -d'v' -f2 | cut -d'.' -f1)
+    if ! command -v node &> /dev/null; then
+        log_error "Node.js is not installed"
+        exit 1
+    fi
+    NODE_VERSION=$(node --version | cut -d'v' -f2 | cut -d'.' -f1)
     if [ "$NODE_VERSION" -lt 18 ]; then
         log_warn "Node.js 18+ recommended (found v$NODE_VERSION). Frontend build may fail."
     fi
