@@ -56,3 +56,11 @@ logs/
 # Build artifacts
 *.kpxe
 *.efi
+
+# Git worktrees
+.worktrees/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
