@@ -1,40 +1,113 @@
-"""Storage backend service layer."""
-import asyncio
-import json
-import logging
-import mimetypes
-import os
-import shutil
-import subprocess
-from datetime import datetime
-from pathlib import Path
-from typing import AsyncIterator, Protocol
+# File Browser API Implementation Plan
 
-import aiohttp
+> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-logger = logging.getLogger(__name__)
+**Goal:** Implement File Browser API endpoints for browsing and managing files on storage backends.
 
+**Architecture:** Extend storage service layer with file operations protocol, add file-specific schemas, create new routes under `/api/v1/storage/backends/{id}/files`. NFS gets full CRUD via filesystem ops, HTTP gets read-only via directory index parsing, S3 gets full implementation via S3-compatible API, iSCSI returns "not applicable" (block storage).
 
-class StorageBackendService(Protocol):
-    """Protocol for storage backend operations."""
+**Tech Stack:** FastAPI, aiohttp, pathlib, mimetypes, aiofiles (for async file I/O)
 
-    async def test_connection(self) -> tuple[bool, str]:
-        """Test connection to the backend. Returns (success, message)."""
-        ...
+**Working Directory:** `/home/kali/Desktop/PureBoot/PureBoot/.worktrees/feature-file-browser`
 
-    async def get_stats(self) -> dict:
-        """Get storage statistics."""
-        ...
+**IMPORTANT:** This is a code-editing-only environment. Do NOT run pip install, pytest, python, or any execution commands. Only create/edit files and make git commits.
 
-    async def mount(self) -> str | None:
-        """Mount the backend (if applicable). Returns mount point."""
-        ...
+---
 
-    async def unmount(self) -> None:
-        """Unmount the backend (if applicable)."""
-        ...
+## Task 1: Add File Browser Schemas
+
+**Files:**
+- Modify: `src/api/schemas.py`
+
+**Step 1: Add file browser schemas**
+
+Add after the `StorageTestResult` class at the end of the file:
+
+```python
+# ============== File Browser Schemas ==============
 
 
+class StorageFile(BaseModel):
+    """File or directory in storage backend."""
+    name: str
+    path: str
+    type: str  # "file" or "directory"
+    size: int | None = None
+    mime_type: str | None = None
+    modified_at: datetime | None = None
+    item_count: int | None = None  # For directories
+
+
+class FileListResponse(BaseModel):
+    """Response for file listing."""
+    path: str
+    files: list[StorageFile]
+    total: int
+
+
+class FolderCreate(BaseModel):
+    """Schema for creating a folder."""
+    path: str
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, v: str) -> str:
+        if not v or not v.startswith("/"):
+            raise ValueError("Path must start with /")
+        if ".." in v:
+            raise ValueError("Path traversal not allowed")
+        return v.rstrip("/") or "/"
+
+
+class FileMove(BaseModel):
+    """Schema for moving files."""
+    source_path: str
+    destination_path: str
+
+    @field_validator("source_path", "destination_path")
+    @classmethod
+    def validate_paths(cls, v: str) -> str:
+        if not v or not v.startswith("/"):
+            raise ValueError("Path must start with /")
+        if ".." in v:
+            raise ValueError("Path traversal not allowed")
+        return v
+
+
+class FileDelete(BaseModel):
+    """Schema for deleting files."""
+    paths: list[str]
+
+    @field_validator("paths")
+    @classmethod
+    def validate_paths(cls, v: list[str]) -> list[str]:
+        for path in v:
+            if not path or not path.startswith("/"):
+                raise ValueError(f"Path must start with /: {path}")
+            if ".." in path:
+                raise ValueError("Path traversal not allowed")
+        return v
+```
+
+**Step 2: Commit**
+
+```bash
+git add src/api/schemas.py
+git commit -m "feat(api): add file browser schemas"
+```
+
+---
+
+## Task 2: Create File Browser Service Protocol
+
+**Files:**
+- Modify: `src/core/storage.py`
+
+**Step 1: Add file browser protocol and helper**
+
+Add after the `StorageBackendService` protocol class:
+
+```python
 class FileInfo:
     """File information data class."""
     def __init__(
@@ -97,124 +170,34 @@ class FileBrowserService(Protocol):
     def supports_write(self) -> bool:
         """Return True if backend supports write operations."""
         ...
+```
 
+Also add import at top:
+```python
+from datetime import datetime
+from typing import Protocol, AsyncIterator
+import mimetypes
+```
 
-class NfsBackendService:
-    """NFS backend operations."""
+**Step 2: Commit**
 
-    def __init__(self, backend_id: str, config: dict):
-        self.backend_id = backend_id
-        self.server = config["server"]
-        self.export_path = config["export_path"]
-        self.mount_options = config.get("mount_options", "vers=4.1")
-        self._mount_base = Path("/tmp/pureboot/nfs")
+```bash
+git add src/core/storage.py
+git commit -m "feat(core): add file browser protocol"
+```
 
-    @property
-    def mount_point(self) -> Path:
-        return self._mount_base / self.backend_id
+---
 
-    async def test_connection(self) -> tuple[bool, str]:
-        """Test NFS connectivity using showmount."""
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "showmount", "-e", self.server,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            try:
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
-            except asyncio.TimeoutError:
-                proc.kill()
-                return False, "Connection test timed out"
+## Task 3: Implement NFS File Browser
 
-            if proc.returncode != 0:
-                return False, f"Cannot reach NFS server: {stderr.decode().strip()}"
+**Files:**
+- Modify: `src/core/storage.py`
 
-            exports = stdout.decode()
-            if self.export_path not in exports:
-                return False, f"Export {self.export_path} not found on {self.server}"
+**Step 1: Add file browser methods to NfsBackendService**
 
-            return True, f"NFS server reachable, export {self.export_path} available"
-        except FileNotFoundError:
-            return False, "showmount command not found (nfs-common not installed)"
-        except Exception as e:
-            return False, f"Connection test failed: {str(e)}"
+Add these methods to the `NfsBackendService` class:
 
-    async def mount(self) -> str | None:
-        """Mount the NFS share."""
-        self.mount_point.mkdir(parents=True, exist_ok=True)
-
-        # Check if already mounted
-        if os.path.ismount(str(self.mount_point)):
-            return str(self.mount_point)
-
-        source = f"{self.server}:{self.export_path}"
-        cmd = ["mount", "-t", "nfs"]
-        if self.mount_options:
-            cmd.extend(["-o", self.mount_options])
-        cmd.extend([source, str(self.mount_point)])
-
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            try:
-                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
-            except asyncio.TimeoutError:
-                proc.kill()
-                logger.error("NFS mount timed out")
-                return None
-
-            if proc.returncode != 0:
-                logger.error(f"NFS mount failed: {stderr.decode()}")
-                return None
-
-            return str(self.mount_point)
-        except Exception as e:
-            logger.error(f"NFS mount error: {e}")
-            return None
-
-    async def unmount(self) -> None:
-        """Unmount the NFS share."""
-        if os.path.ismount(str(self.mount_point)):
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    "umount", str(self.mount_point),
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                try:
-                    await asyncio.wait_for(proc.communicate(), timeout=10)
-                except asyncio.TimeoutError:
-                    proc.kill()
-                    logger.error("NFS unmount timed out")
-            except Exception as e:
-                logger.error(f"NFS unmount error: {e}")
-
-    async def get_stats(self) -> dict:
-        """Get NFS storage statistics."""
-        if not os.path.ismount(str(self.mount_point)):
-            mount_result = await self.mount()
-            if not mount_result:
-                return {"used_bytes": 0, "total_bytes": None, "file_count": 0}
-
-        try:
-            stat = shutil.disk_usage(str(self.mount_point))
-
-            # Count files
-            file_count = sum(1 for _ in self.mount_point.rglob("*") if _.is_file())
-
-            return {
-                "used_bytes": stat.used,
-                "total_bytes": stat.total,
-                "file_count": file_count,
-            }
-        except Exception as e:
-            logger.error(f"Failed to get NFS stats: {e}")
-            return {"used_bytes": 0, "total_bytes": None, "file_count": 0}
-
+```python
     def supports_write(self) -> bool:
         return True
 
@@ -394,63 +377,27 @@ class NfsBackendService:
                 mime_type=mime_type,
                 modified_at=datetime.fromtimestamp(stat.st_mtime),
             )
+```
 
+**Step 2: Commit**
 
-class HttpBackendService:
-    """HTTP backend operations."""
+```bash
+git add src/core/storage.py
+git commit -m "feat(core): implement NFS file browser operations"
+```
 
-    def __init__(self, backend_id: str, config: dict):
-        self.backend_id = backend_id
-        self.base_url = config["base_url"]
-        self.auth_method = config.get("auth_method", "none")
-        self.username = config.get("username")
-        self.password = config.get("password")
+---
 
-    def _get_auth(self) -> aiohttp.BasicAuth | None:
-        """Get auth for requests."""
-        if self.auth_method == "basic" and self.username:
-            return aiohttp.BasicAuth(self.username, self.password or "")
-        return None
+## Task 4: Implement HTTP File Browser (Read-Only)
 
-    def _get_headers(self) -> dict:
-        """Get headers for requests."""
-        headers = {}
-        if self.auth_method == "bearer" and self.password:
-            headers["Authorization"] = f"Bearer {self.password}"
-        return headers
+**Files:**
+- Modify: `src/core/storage.py`
 
-    async def test_connection(self) -> tuple[bool, str]:
-        """Test HTTP connectivity."""
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.head(
-                    self.base_url,
-                    auth=self._get_auth(),
-                    headers=self._get_headers(),
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    if resp.status < 400:
-                        return True, f"HTTP endpoint reachable (status {resp.status})"
-                    return False, f"HTTP endpoint returned status {resp.status}"
-        except aiohttp.ClientError as e:
-            return False, f"HTTP connection failed: {str(e)}"
-        except Exception as e:
-            return False, f"Connection test failed: {str(e)}"
+**Step 1: Add file browser methods to HttpBackendService**
 
-    async def mount(self) -> str | None:
-        """HTTP backends don't need mounting."""
-        return None
+Add these methods to the `HttpBackendService` class:
 
-    async def unmount(self) -> None:
-        """HTTP backends don't need unmounting."""
-        pass
-
-    async def get_stats(self) -> dict:
-        """Get HTTP storage statistics (limited info available)."""
-        # HTTP backends can't easily report disk usage
-        # We'd need to crawl the directory listing
-        return {"used_bytes": 0, "total_bytes": None, "file_count": 0}
-
+```python
     def supports_write(self) -> bool:
         return False
 
@@ -489,7 +436,7 @@ class HttpBackendService:
         # Match common directory listing patterns
         # Apache: <a href="filename">filename</a>
         # nginx: <a href="filename">filename</a>  date  size
-        pattern = r'<a\s+href="([^"]+)"[^>]*>([^<]+)</a>'
+        pattern = r'<a\s+href="([^"]+)"[^>]*>([^<]+)</a>(?:\s*</td><td[^>]*>([^<]*)</td><td[^>]*>([^<]*)</td>)?'
 
         for match in re.finditer(pattern, html, re.IGNORECASE):
             href = match.group(1)
@@ -581,57 +528,60 @@ class HttpBackendService:
     async def move_file(self, source: str, destination: str) -> FileInfo:
         """HTTP backends are read-only."""
         raise ValueError("HTTP backends are read-only")
+```
 
+**Step 2: Commit**
 
-class S3BackendService:
-    """S3 backend operations."""
+```bash
+git add src/core/storage.py
+git commit -m "feat(core): implement HTTP file browser (read-only)"
+```
 
-    def __init__(self, backend_id: str, config: dict):
-        self.backend_id = backend_id
-        self.config = config
-        self.endpoint = config["endpoint"]
-        self.bucket = config["bucket"]
+---
 
+## Task 5: Implement S3 File Browser
+
+**Files:**
+- Modify: `src/core/storage.py`
+
+**Step 1: Add file browser methods to S3BackendService**
+
+Add these methods to the `S3BackendService` class:
+
+```python
     def supports_write(self) -> bool:
         return True
 
-    async def test_connection(self) -> tuple[bool, str]:
-        """Test S3 connectivity."""
-        url = f"{self.endpoint}/{self.bucket}?list-type=2&max-keys=1"
+    def _get_s3_client_params(self) -> tuple[str, dict]:
+        """Get S3 endpoint URL and auth headers."""
+        endpoint = self.config["endpoint"]
+        bucket = self.config["bucket"]
+        access_key = self.config.get("access_key_id", "")
+        secret_key = self.config.get("secret_access_key", "")
+        region = self.config.get("region", "us-east-1")
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    if resp.status < 400:
-                        return True, f"S3 bucket accessible"
-                    return False, f"S3 error: {resp.status}"
-        except aiohttp.ClientError as e:
-            return False, f"S3 connection failed: {str(e)}"
-
-    async def mount(self) -> str | None:
-        return None
-
-    async def unmount(self) -> None:
-        pass
-
-    async def get_stats(self) -> dict:
-        return {"used_bytes": 0, "total_bytes": None, "file_count": 0}
+        # For S3-compatible APIs, we use basic auth or AWS signature
+        # This is a simplified implementation
+        return endpoint, bucket, access_key, secret_key, region
 
     async def list_files(self, path: str) -> list[FileInfo]:
         """List files in S3 bucket."""
         if ".." in path:
             raise ValueError("Path traversal not allowed")
 
+        endpoint, bucket, access_key, secret_key, region = self._get_s3_client_params()
         prefix = path.lstrip("/")
         if prefix and not prefix.endswith("/"):
             prefix += "/"
         if prefix == "/":
             prefix = ""
 
-        url = f"{self.endpoint}/{self.bucket}?list-type=2&prefix={prefix}&delimiter=/"
+        url = f"{endpoint}/{bucket}?list-type=2&prefix={prefix}&delimiter=/"
 
         try:
             async with aiohttp.ClientSession() as session:
+                # Simple unsigned request for public buckets
+                # For authenticated access, AWS signature v4 would be needed
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                     if resp.status >= 400:
                         raise ValueError(f"S3 error: {resp.status}")
@@ -658,9 +608,10 @@ class S3BackendService:
                 ))
 
         # Parse contents (files)
-        for match in re.finditer(r'<Contents>.*?<Key>([^<]+)</Key>.*?<Size>([^<]+)</Size>.*?</Contents>', xml_content, re.DOTALL):
+        for match in re.finditer(r'<Contents>.*?<Key>([^<]+)</Key>.*?<Size>([^<]+)</Size>.*?<LastModified>([^<]+)</LastModified>.*?</Contents>', xml_content, re.DOTALL):
             key = match.group(1)
             size = int(match.group(2))
+            modified = match.group(3)
 
             # Skip directory markers
             if key.endswith("/"):
@@ -684,8 +635,9 @@ class S3BackendService:
         if ".." in path:
             raise ValueError("Path traversal not allowed")
 
+        endpoint, bucket, access_key, secret_key, region = self._get_s3_client_params()
         key = path.lstrip("/")
-        url = f"{self.endpoint}/{self.bucket}/{key}"
+        url = f"{endpoint}/{bucket}/{key}"
 
         try:
             session = aiohttp.ClientSession()
@@ -718,10 +670,12 @@ class S3BackendService:
         if ".." in path or ".." in filename:
             raise ValueError("Path traversal not allowed")
 
+        endpoint, bucket, access_key, secret_key, region = self._get_s3_client_params()
+
         # Build key
         base = path.lstrip("/").rstrip("/")
         key = f"{base}/{filename}" if base else filename
-        url = f"{self.endpoint}/{self.bucket}/{key}"
+        url = f"{endpoint}/{bucket}/{key}"
 
         # Collect content
         data = b""
@@ -751,13 +705,14 @@ class S3BackendService:
 
     async def delete_files(self, paths: list[str]) -> int:
         """Delete files from S3."""
+        endpoint, bucket, access_key, secret_key, region = self._get_s3_client_params()
         deleted = 0
 
         for path in paths:
             if ".." in path:
                 continue
             key = path.lstrip("/")
-            url = f"{self.endpoint}/{self.bucket}/{key}"
+            url = f"{endpoint}/{bucket}/{key}"
 
             try:
                 async with aiohttp.ClientSession() as session:
@@ -774,8 +729,9 @@ class S3BackendService:
         if ".." in path:
             raise ValueError("Path traversal not allowed")
 
+        endpoint, bucket, access_key, secret_key, region = self._get_s3_client_params()
         key = path.lstrip("/").rstrip("/") + "/"
-        url = f"{self.endpoint}/{self.bucket}/{key}"
+        url = f"{endpoint}/{bucket}/{key}"
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -802,12 +758,14 @@ class S3BackendService:
         if ".." in source or ".." in destination:
             raise ValueError("Path traversal not allowed")
 
+        endpoint, bucket, access_key, secret_key, region = self._get_s3_client_params()
+
         src_key = source.lstrip("/")
         dst_key = destination.lstrip("/")
 
         # Copy
-        copy_url = f"{self.endpoint}/{self.bucket}/{dst_key}"
-        copy_source = f"/{self.bucket}/{src_key}"
+        copy_url = f"{endpoint}/{bucket}/{dst_key}"
+        copy_source = f"/{bucket}/{src_key}"
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -821,7 +779,7 @@ class S3BackendService:
                         raise ValueError(f"S3 copy error: {resp.status}")
 
                 # Delete source
-                delete_url = f"{self.endpoint}/{self.bucket}/{src_key}"
+                delete_url = f"{endpoint}/{bucket}/{src_key}"
                 await session.delete(delete_url, timeout=aiohttp.ClientTimeout(total=30))
         except aiohttp.ClientError as e:
             raise ValueError(f"S3 move failed: {str(e)}")
@@ -834,27 +792,45 @@ class S3BackendService:
             file_type="file",
             mime_type=mime_type,
         )
+```
 
+Also update the test_connection method:
 
-class IscsiBackendService:
-    """iSCSI backend operations - block storage, file browsing not applicable."""
-
-    def __init__(self, backend_id: str, config: dict):
-        self.backend_id = backend_id
-        self.config = config
-
+```python
     async def test_connection(self) -> tuple[bool, str]:
-        return False, "iSCSI backend not yet implemented"
+        """Test S3 connectivity."""
+        endpoint, bucket, access_key, secret_key, region = self._get_s3_client_params()
+        url = f"{endpoint}/{bucket}?list-type=2&max-keys=1"
 
-    async def mount(self) -> str | None:
-        return None
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status < 400:
+                        return True, f"S3 bucket accessible"
+                    return False, f"S3 error: {resp.status}"
+        except aiohttp.ClientError as e:
+            return False, f"S3 connection failed: {str(e)}"
+```
 
-    async def unmount(self) -> None:
-        pass
+**Step 2: Commit**
 
-    async def get_stats(self) -> dict:
-        return {"used_bytes": 0, "total_bytes": None, "file_count": 0}
+```bash
+git add src/core/storage.py
+git commit -m "feat(core): implement S3 file browser operations"
+```
 
+---
+
+## Task 6: Implement iSCSI File Browser (Not Applicable)
+
+**Files:**
+- Modify: `src/core/storage.py`
+
+**Step 1: Add file browser methods to IscsiBackendService**
+
+Add these methods to return "not applicable" errors:
+
+```python
     def supports_write(self) -> bool:
         return False
 
@@ -875,17 +851,324 @@ class IscsiBackendService:
 
     async def move_file(self, source: str, destination: str) -> FileInfo:
         raise ValueError("iSCSI is block storage - file operations not applicable")
+```
+
+**Step 2: Commit**
+
+```bash
+git add src/core/storage.py
+git commit -m "feat(core): add iSCSI file browser stubs (not applicable)"
+```
+
+---
+
+## Task 7: Create File Browser Routes
+
+**Files:**
+- Create: `src/api/routes/files.py`
+
+**Step 1: Create file browser router**
+
+```python
+"""File browser API endpoints."""
+import json
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi.responses import StreamingResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.api.schemas import (
+    ApiResponse,
+    FileListResponse,
+    FolderCreate,
+    FileMove,
+    FileDelete,
+    StorageFile,
+)
+from src.core.storage import get_backend_service
+from src.db.database import get_db
+from src.db.models import StorageBackend
+
+router = APIRouter()
 
 
-def get_backend_service(backend_id: str, backend_type: str, config: dict):
-    """Factory to get the appropriate backend service."""
-    services = {
-        "nfs": NfsBackendService,
-        "http": HttpBackendService,
-        "s3": S3BackendService,
-        "iscsi": IscsiBackendService,
-    }
-    service_class = services.get(backend_type)
-    if not service_class:
-        raise ValueError(f"Unknown backend type: {backend_type}")
-    return service_class(backend_id, config)
+async def get_backend_and_service(backend_id: str, db: AsyncSession):
+    """Helper to get backend and its file service."""
+    result = await db.execute(
+        select(StorageBackend).where(StorageBackend.id == backend_id)
+    )
+    backend = result.scalar_one_or_none()
+
+    if not backend:
+        raise HTTPException(status_code=404, detail="Backend not found")
+
+    config = json.loads(backend.config_json)
+    service = get_backend_service(backend.id, backend.type, config)
+
+    return backend, service
+
+
+@router.get("/storage/backends/{backend_id}/files", response_model=ApiResponse[FileListResponse])
+async def list_files(
+    backend_id: str,
+    path: str = Query(default="/", description="Directory path to list"),
+    db: AsyncSession = Depends(get_db),
+):
+    """List files in a storage backend directory."""
+    backend, service = await get_backend_and_service(backend_id, db)
+
+    try:
+        files = await service.list_files(path)
+        file_list = [
+            StorageFile(
+                name=f.name,
+                path=f.path,
+                type=f.type,
+                size=f.size,
+                mime_type=f.mime_type,
+                modified_at=f.modified_at,
+                item_count=f.item_count,
+            )
+            for f in files
+        ]
+
+        return ApiResponse(
+            data=FileListResponse(
+                path=path,
+                files=file_list,
+                total=len(file_list),
+            )
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/storage/backends/{backend_id}/files/download")
+async def download_file(
+    backend_id: str,
+    path: str = Query(..., description="File path to download"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Download a file from storage backend."""
+    backend, service = await get_backend_and_service(backend_id, db)
+
+    try:
+        content_iterator, mime_type, size = await service.download_file(path)
+
+        filename = path.split("/")[-1]
+        headers = {
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        }
+        if size > 0:
+            headers["Content-Length"] = str(size)
+
+        return StreamingResponse(
+            content_iterator,
+            media_type=mime_type,
+            headers=headers,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/storage/backends/{backend_id}/files", response_model=ApiResponse[StorageFile])
+async def upload_file(
+    backend_id: str,
+    path: str = Query(default="/", description="Directory path to upload to"),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a file to storage backend."""
+    backend, service = await get_backend_and_service(backend_id, db)
+
+    if not service.supports_write():
+        raise HTTPException(status_code=400, detail="Backend is read-only")
+
+    try:
+        async def content_iterator():
+            while chunk := await file.read(8192):
+                yield chunk
+
+        result = await service.upload_file(path, file.filename, content_iterator())
+
+        return ApiResponse(
+            data=StorageFile(
+                name=result.name,
+                path=result.path,
+                type=result.type,
+                size=result.size,
+                mime_type=result.mime_type,
+                modified_at=result.modified_at,
+                item_count=result.item_count,
+            ),
+            message="File uploaded successfully",
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/storage/backends/{backend_id}/files", response_model=ApiResponse[dict])
+async def delete_files(
+    backend_id: str,
+    body: FileDelete,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete files from storage backend."""
+    backend, service = await get_backend_and_service(backend_id, db)
+
+    if not service.supports_write():
+        raise HTTPException(status_code=400, detail="Backend is read-only")
+
+    try:
+        deleted = await service.delete_files(body.paths)
+
+        return ApiResponse(
+            data={"deleted": deleted},
+            message=f"Deleted {deleted} item(s)",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/storage/backends/{backend_id}/folders", response_model=ApiResponse[StorageFile])
+async def create_folder(
+    backend_id: str,
+    body: FolderCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a folder in storage backend."""
+    backend, service = await get_backend_and_service(backend_id, db)
+
+    if not service.supports_write():
+        raise HTTPException(status_code=400, detail="Backend is read-only")
+
+    try:
+        result = await service.create_folder(body.path)
+
+        return ApiResponse(
+            data=StorageFile(
+                name=result.name,
+                path=result.path,
+                type=result.type,
+                size=result.size,
+                mime_type=result.mime_type,
+                modified_at=result.modified_at,
+                item_count=result.item_count,
+            ),
+            message="Folder created successfully",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/storage/backends/{backend_id}/files/move", response_model=ApiResponse[StorageFile])
+async def move_file(
+    backend_id: str,
+    body: FileMove,
+    db: AsyncSession = Depends(get_db),
+):
+    """Move a file in storage backend."""
+    backend, service = await get_backend_and_service(backend_id, db)
+
+    if not service.supports_write():
+        raise HTTPException(status_code=400, detail="Backend is read-only")
+
+    try:
+        result = await service.move_file(body.source_path, body.destination_path)
+
+        return ApiResponse(
+            data=StorageFile(
+                name=result.name,
+                path=result.path,
+                type=result.type,
+                size=result.size,
+                mime_type=result.mime_type,
+                modified_at=result.modified_at,
+                item_count=result.item_count,
+            ),
+            message="File moved successfully",
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+```
+
+**Step 2: Commit**
+
+```bash
+git add src/api/routes/files.py
+git commit -m "feat(api): add file browser routes"
+```
+
+---
+
+## Task 8: Register File Browser Router
+
+**Files:**
+- Modify: `src/main.py`
+
+**Step 1: Update imports and register router**
+
+Add to imports:
+```python
+from src.api.routes import boot, ipxe, nodes, groups, storage, files
+```
+
+Add router registration after storage router:
+```python
+app.include_router(files.router, prefix="/api/v1", tags=["files"])
+```
+
+**Step 2: Commit**
+
+```bash
+git add src/main.py
+git commit -m "feat(api): register file browser router"
+```
+
+---
+
+## Task 9: Push and Create PR
+
+**Step 1: Push branch**
+
+```bash
+git push -u origin feature/file-browser
+```
+
+**Step 2: Create PR**
+
+Create PR referencing issue #15.
+
+---
+
+## Summary
+
+**Files created:**
+- `src/api/routes/files.py` - File browser endpoints
+
+**Files modified:**
+- `src/api/schemas.py` - Added file browser schemas
+- `src/core/storage.py` - Added file browser protocol and implementations for all backends
+- `src/main.py` - Registered file browser router
+
+**Endpoints implemented:**
+- `GET /api/v1/storage/backends/{id}/files` - List files
+- `GET /api/v1/storage/backends/{id}/files/download` - Download file
+- `POST /api/v1/storage/backends/{id}/files` - Upload file
+- `DELETE /api/v1/storage/backends/{id}/files` - Delete files
+- `POST /api/v1/storage/backends/{id}/folders` - Create folder
+- `POST /api/v1/storage/backends/{id}/files/move` - Move file
+
+**Backend support:**
+- NFS - Full CRUD (list, download, upload, delete, create folder, move)
+- HTTP - Read-only (list, download)
+- S3 - Full CRUD (list, download, upload, delete, create folder, move)
+- iSCSI - Not applicable (block storage)
