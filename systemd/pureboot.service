@@ -1,0 +1,29 @@
+[Unit]
+Description=PureBoot - Vendor-Neutral Node Lifecycle Platform
+Documentation=https://github.com/mrveiss/pureboot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pureboot
+Group=pureboot
+WorkingDirectory=/opt/pureboot
+Environment=PATH=/opt/pureboot/.venv/bin:/usr/bin:/bin
+EnvironmentFile=-/opt/pureboot/.env
+ExecStart=/opt/pureboot/.venv/bin/python -m src.main
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pureboot
+
+# Security hardening
+NoNewPrivileges=false
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/pureboot/data /opt/pureboot/tftp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

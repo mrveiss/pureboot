@@ -33,24 +33,73 @@ discovered → pending → installing → installed → active → retired
                                             reprovision
 ```
 
-## Quick Start
+## Deployment (Ubuntu)
+
+### Production Installation
 
 ```bash
 # Clone repository
 git clone https://github.com/mrveiss/pureboot.git
 cd pureboot
 
+# Run installer (as root)
+sudo ./scripts/setup.sh
+```
+
+The installer will:
+
+- Install system dependencies (Python 3.11+, Node.js)
+- Create `pureboot` service user
+- Install to `/opt/pureboot`
+- Build frontend
+- Configure systemd service
+
+### Service Management
+
+```bash
+service pureboot start     # Start PureBoot
+service pureboot stop      # Stop PureBoot
+service pureboot restart   # Restart PureBoot
+service pureboot status    # Check status
+journalctl -u pureboot -f  # View logs
+```
+
+### Updating
+
+```bash
+cd pureboot
+sudo ./scripts/setup.sh update
+```
+
+Updates will pull latest code, install new dependencies, rebuild frontend, and restart the service. Your data (database, TFTP files, configuration) is preserved.
+
+### Configuration
+
+Edit `/opt/pureboot/.env` to override default settings:
+
+```bash
+PUREBOOT_HOST=0.0.0.0
+PUREBOOT_PORT=8080
+PUREBOOT_DEBUG=false
+PUREBOOT_TFTP__ENABLED=true
+PUREBOOT_TFTP__PORT=69
+PUREBOOT_DHCP_PROXY__ENABLED=false
+```
+
+### Development Setup
+
+For local development (not production):
+
+```bash
+# Create virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
 # Install dependencies
 pip install -r requirements.txt
 
-# Start database
-docker-compose up -d db
-
-# Run migrations
-python -m scripts.migrate
-
-# Start development server
-uvicorn main:app --reload
+# Run development server
+python -m src.main
 ```
 
 ## Documentation
