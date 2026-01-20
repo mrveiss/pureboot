@@ -18,3 +18,10 @@ export {
   useDeleteGroup,
   groupKeys,
 } from './useGroups'
+export {
+  useBulkAssignGroup,
+  useBulkAssignWorkflow,
+  useBulkAddTag,
+  useBulkRemoveTag,
+  useBulkChangeState,
+} from './useBulkActions'
