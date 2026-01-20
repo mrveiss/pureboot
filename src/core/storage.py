@@ -837,7 +837,7 @@ class S3BackendService:
 
 
 class IscsiBackendService:
-    """iSCSI backend operations (stub)."""
+    """iSCSI backend operations - block storage, file browsing not applicable."""
 
     def __init__(self, backend_id: str, config: dict):
         self.backend_id = backend_id
@@ -854,6 +854,27 @@ class IscsiBackendService:
 
     async def get_stats(self) -> dict:
         return {"used_bytes": 0, "total_bytes": None, "file_count": 0}
+
+    def supports_write(self) -> bool:
+        return False
+
+    async def list_files(self, path: str) -> list[FileInfo]:
+        raise ValueError("iSCSI is block storage - file browsing not applicable")
+
+    async def download_file(self, path: str) -> tuple[AsyncIterator[bytes], str, int]:
+        raise ValueError("iSCSI is block storage - file operations not applicable")
+
+    async def upload_file(self, path: str, filename: str, content: AsyncIterator[bytes]) -> FileInfo:
+        raise ValueError("iSCSI is block storage - file operations not applicable")
+
+    async def delete_files(self, paths: list[str]) -> int:
+        raise ValueError("iSCSI is block storage - file operations not applicable")
+
+    async def create_folder(self, path: str) -> FileInfo:
+        raise ValueError("iSCSI is block storage - file operations not applicable")
+
+    async def move_file(self, source: str, destination: str) -> FileInfo:
+        raise ValueError("iSCSI is block storage - file operations not applicable")
 
 
 def get_backend_service(backend_id: str, backend_type: str, config: dict):
