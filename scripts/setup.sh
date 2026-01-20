@@ -231,8 +231,14 @@ build_frontend() {
 
 set_capabilities() {
     log_info "Setting network capabilities..."
-    setcap 'cap_net_bind_service=+ep' "$INSTALL_DIR/.venv/bin/python3"
-    log_info "Capabilities set (ports 69, 4011 enabled)"
+    # Resolve symlink to actual python binary
+    PYTHON_BIN=$(readlink -f "$INSTALL_DIR/.venv/bin/python3")
+    if setcap 'cap_net_bind_service=+ep' "$PYTHON_BIN" 2>/dev/null; then
+        log_info "Capabilities set (ports 69, 4011 enabled)"
+    else
+        log_warn "Could not set capabilities on $PYTHON_BIN"
+        log_warn "TFTP (port 69) and Proxy DHCP (port 4011) will require root"
+    fi
 }
 
 set_ownership() {
