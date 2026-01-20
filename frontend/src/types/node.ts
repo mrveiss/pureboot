@@ -72,3 +72,35 @@ export const NODE_STATE_LABELS: Record<NodeState, string> = {
   decommissioned: 'Decommissioned',
   wiping: 'Wiping',
 }
+
+// Valid state transitions
+export const NODE_STATE_TRANSITIONS: Record<NodeState, NodeState[]> = {
+  discovered: ['pending', 'ignored'],
+  ignored: ['discovered'],
+  pending: ['installing'],
+  installing: ['installed'],
+  installed: ['active'],
+  active: ['reprovision', 'migrating', 'retired'],
+  reprovision: ['pending'],
+  migrating: ['active'],
+  retired: ['decommissioned'],
+  decommissioned: ['wiping'],
+  wiping: ['decommissioned'],
+}
+
+export interface StateHistoryEntry {
+  id: string
+  node_id: string
+  from_state: NodeState | null
+  to_state: NodeState
+  changed_by: string
+  changed_at: string
+  comment: string | null
+}
+
+export interface NodeStats {
+  total: number
+  by_state: Record<NodeState, number>
+  discovered_last_hour: number
+  installing_count: number
+}
