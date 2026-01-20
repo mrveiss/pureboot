@@ -49,6 +49,41 @@ export const nodesApi = {
   async removeTag(nodeId: string, tag: string): Promise<ApiResponse<Node>> {
     return apiClient.delete<ApiResponse<Node>>(`/nodes/${nodeId}/tags/${tag}`)
   },
+
+  async bulkAssignGroup(nodeIds: string[], groupId: string | null): Promise<ApiResponse<{ updated: number }>> {
+    return apiClient.post<ApiResponse<{ updated: number }>>('/nodes/bulk/assign-group', {
+      node_ids: nodeIds,
+      group_id: groupId,
+    })
+  },
+
+  async bulkAssignWorkflow(nodeIds: string[], workflowId: string | null): Promise<ApiResponse<{ updated: number }>> {
+    return apiClient.post<ApiResponse<{ updated: number }>>('/nodes/bulk/assign-workflow', {
+      node_ids: nodeIds,
+      workflow_id: workflowId,
+    })
+  },
+
+  async bulkAddTag(nodeIds: string[], tag: string): Promise<ApiResponse<{ updated: number }>> {
+    return apiClient.post<ApiResponse<{ updated: number }>>('/nodes/bulk/add-tag', {
+      node_ids: nodeIds,
+      tag,
+    })
+  },
+
+  async bulkRemoveTag(nodeIds: string[], tag: string): Promise<ApiResponse<{ updated: number }>> {
+    return apiClient.post<ApiResponse<{ updated: number }>>('/nodes/bulk/remove-tag', {
+      node_ids: nodeIds,
+      tag,
+    })
+  },
+
+  async bulkChangeState(nodeIds: string[], newState: string): Promise<ApiResponse<{ updated: number; failed: number }>> {
+    return apiClient.post<ApiResponse<{ updated: number; failed: number }>>('/nodes/bulk/change-state', {
+      node_ids: nodeIds,
+      new_state: newState,
+    })
+  },
 }
 
 export const groupsApi = {
