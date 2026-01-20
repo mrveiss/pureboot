@@ -412,3 +412,73 @@ class StorageTestResult(BaseModel):
 
     success: bool
     message: str
+
+
+# ============== File Browser Schemas ==============
+
+
+class StorageFile(BaseModel):
+    """File or directory in storage backend."""
+
+    name: str
+    path: str
+    type: str  # "file" or "directory"
+    size: int | None = None
+    mime_type: str | None = None
+    modified_at: datetime | None = None
+    item_count: int | None = None  # For directories
+
+
+class FileListResponse(BaseModel):
+    """Response for file listing."""
+
+    path: str
+    files: list[StorageFile]
+    total: int
+
+
+class FolderCreate(BaseModel):
+    """Schema for creating a folder."""
+
+    path: str
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, v: str) -> str:
+        if not v or not v.startswith("/"):
+            raise ValueError("Path must start with /")
+        if ".." in v:
+            raise ValueError("Path traversal not allowed")
+        return v.rstrip("/") or "/"
+
+
+class FileMove(BaseModel):
+    """Schema for moving files."""
+
+    source_path: str
+    destination_path: str
+
+    @field_validator("source_path", "destination_path")
+    @classmethod
+    def validate_paths(cls, v: str) -> str:
+        if not v or not v.startswith("/"):
+            raise ValueError("Path must start with /")
+        if ".." in v:
+            raise ValueError("Path traversal not allowed")
+        return v
+
+
+class FileDelete(BaseModel):
+    """Schema for deleting files."""
+
+    paths: list[str]
+
+    @field_validator("paths")
+    @classmethod
+    def validate_paths(cls, v: list[str]) -> list[str]:
+        for path in v:
+            if not path or not path.startswith("/"):
+                raise ValueError(f"Path must start with /: {path}")
+            if ".." in path:
+                raise ValueError("Path traversal not allowed")
+        return v
