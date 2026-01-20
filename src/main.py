@@ -7,7 +7,8 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from src.api.routes import boot, ipxe
+from src.api.routes import boot, ipxe, nodes, groups
+from src.db.database import init_db, close_db
 from src.config import settings
 from src.pxe.tftp_server import TFTPServer
 from src.pxe.dhcp_proxy import DHCPProxy
@@ -29,6 +30,10 @@ async def lifespan(app: FastAPI):
     global tftp_server, dhcp_proxy
 
     logger.info("Starting PureBoot...")
+
+    # Initialize database
+    await init_db()
+    logger.info("Database initialized")
 
     # Ensure TFTP root exists
     tftp_root = Path(settings.tftp.root)
@@ -82,6 +87,9 @@ async def lifespan(app: FastAPI):
     if dhcp_proxy:
         await dhcp_proxy.stop()
 
+    await close_db()
+    logger.info("Database connections closed")
+
 
 app = FastAPI(
     title="PureBoot",
@@ -93,6 +101,8 @@ app = FastAPI(
 # Mount API routes
 app.include_router(boot.router, prefix="/api/v1", tags=["boot"])
 app.include_router(ipxe.router, prefix="/api/v1", tags=["ipxe"])
+app.include_router(nodes.router, prefix="/api/v1", tags=["nodes"])
+app.include_router(groups.router, prefix="/api/v1", tags=["groups"])
 
 # Mount static files for assets (if directory exists)
 assets_dir = Path("assets")
