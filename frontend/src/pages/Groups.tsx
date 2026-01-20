@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import {
   Plus,
   FolderOpen,
-  MoreVertical,
   Pencil,
   Trash2,
   Users,
@@ -25,7 +24,6 @@ import {
 } from '@/components/ui'
 import { useGroups, useCreateGroup, useUpdateGroup, useDeleteGroup } from '@/hooks'
 import type { DeviceGroup } from '@/types'
-import { cn } from '@/lib/utils'
 
 export function Groups() {
   const { data: response, isLoading } = useGroups()

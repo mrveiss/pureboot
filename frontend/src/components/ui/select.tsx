@@ -7,6 +7,7 @@ interface SelectContextValue {
   onValueChange: (value: string) => void
   open: boolean
   setOpen: (open: boolean) => void
+  disabled: boolean
 }
 
 const SelectContext = React.createContext<SelectContextValue | null>(null)
@@ -23,9 +24,10 @@ interface SelectProps {
   value?: string
   onValueChange?: (value: string) => void
   children: React.ReactNode
+  disabled?: boolean
 }
 
-function Select({ value = '', onValueChange, children }: SelectProps) {
+function Select({ value = '', onValueChange, children, disabled = false }: SelectProps) {
   const [internalValue, setInternalValue] = React.useState(value)
   const [open, setOpen] = React.useState(false)
   const isControlled = onValueChange !== undefined
@@ -33,7 +35,7 @@ function Select({ value = '', onValueChange, children }: SelectProps) {
   const setValue = isControlled ? onValueChange : setInternalValue
 
   return (
-    <SelectContext.Provider value={{ value: currentValue, onValueChange: setValue, open, setOpen }}>
+    <SelectContext.Provider value={{ value: currentValue, onValueChange: setValue, open, setOpen, disabled }}>
       <div className="relative">
         {children}
       </div>
@@ -46,14 +48,16 @@ interface SelectTriggerProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 }
 
 const SelectTrigger = React.forwardRef<HTMLButtonElement, SelectTriggerProps>(
-  ({ className, children, ...props }, ref) => {
-    const { open, setOpen } = useSelectContext()
+  ({ className, children, disabled: triggerDisabled, ...props }, ref) => {
+    const { open, setOpen, disabled: contextDisabled } = useSelectContext()
+    const isDisabled = triggerDisabled ?? contextDisabled
 
     return (
       <button
         type="button"
         ref={ref}
-        onClick={() => setOpen(!open)}
+        onClick={() => !isDisabled && setOpen(!open)}
+        disabled={isDisabled}
         className={cn(
           'flex h-9 w-full items-center justify-between rounded-md border border-input',
           'bg-transparent px-3 py-2 text-sm shadow-sm',

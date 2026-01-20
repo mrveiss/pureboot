@@ -99,7 +99,7 @@ export function useDeleteFiles() {
   return useMutation({
     mutationFn: ({ backendId, paths }: { backendId: string; paths: string[] }) =>
       storageFilesApi.delete(backendId, paths),
-    onSuccess: (_, { backendId }) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: storageKeys.all })
     },
   })
@@ -118,7 +118,7 @@ export function useMoveFiles() {
       sourcePaths: string[]
       destinationPath: string
     }) => storageFilesApi.move(backendId, sourcePaths, destinationPath),
-    onSuccess: (_, { backendId }) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: storageKeys.all })
     },
   })

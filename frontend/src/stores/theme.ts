@@ -23,7 +23,7 @@ function applyTheme(theme: Theme) {
 
 export const useThemeStore = create<ThemeStore>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       theme: 'system',
       resolvedTheme: getSystemTheme(),
 

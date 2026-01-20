@@ -1,4 +1,4 @@
-import { HardDrive, Server, Cloud, Globe, MoreVertical, Pencil, Trash2, Zap } from 'lucide-react'
+import { HardDrive, Server, Cloud, Globe, Pencil, Trash2, Zap } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, Button, Badge } from '@/components/ui'
 import {
   STORAGE_BACKEND_TYPE_LABELS,

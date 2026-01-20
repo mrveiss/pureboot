@@ -1,18 +1,14 @@
 import { useState } from 'react'
 import {
-  GitBranch,
   FolderOpen,
   Tag,
   RefreshCw,
-  Archive,
-  Trash2,
   X,
 } from 'lucide-react'
 import { Button, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, Input, Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui'
 import { useSelectionStore } from '@/stores'
 import { useGroups, useBulkAssignGroup, useBulkAddTag, useBulkChangeState } from '@/hooks'
 import { NODE_STATE_LABELS, type NodeState } from '@/types'
-import { cn } from '@/lib/utils'
 
 type ActionDialogType = 'group' | 'tag' | 'state' | null
 

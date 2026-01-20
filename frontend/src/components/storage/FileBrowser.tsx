@@ -8,7 +8,6 @@ import {
   FolderPlus,
   Download,
   Trash2,
-  Move,
 } from 'lucide-react'
 import {
   Button,
@@ -28,7 +27,7 @@ import {
 } from '@/components/ui'
 import { useStorageFiles, useCreateFolder, useDeleteFiles, useStorageBackends } from '@/hooks'
 import { storageFilesApi } from '@/api'
-import type { StorageFile, StorageBackend } from '@/types'
+import type { StorageFile } from '@/types'
 import { cn } from '@/lib/utils'
 
 function formatBytes(bytes: number | null): string {

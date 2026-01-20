@@ -43,7 +43,7 @@ export const storageFilesApi = {
   async list(backendId: string, path: string = '/'): Promise<ApiListResponse<StorageFile>> {
     return apiClient.get<ApiListResponse<StorageFile>>(
       `/storage/backends/${backendId}/files`,
-      { params: { path } }
+      { path }
     )
   },
 
@@ -55,9 +55,9 @@ export const storageFilesApi = {
   },
 
   async delete(backendId: string, paths: string[]): Promise<ApiResponse<{ deleted: number }>> {
-    return apiClient.delete<ApiResponse<{ deleted: number }>>(
-      `/storage/backends/${backendId}/files`,
-      { data: { paths } }
+    return apiClient.post<ApiResponse<{ deleted: number }>>(
+      `/storage/backends/${backendId}/files/delete`,
+      { paths }
     )
   },
 
