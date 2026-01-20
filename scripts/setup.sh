@@ -73,18 +73,51 @@ check_ubuntu() {
 install_system_packages() {
     log_info "Installing system packages..."
     apt-get update -qq
-    apt-get install -y -qq python3 python3-venv python3-pip nodejs npm libcap2-bin > /dev/null
+    apt-get install -y -qq software-properties-common libcap2-bin curl > /dev/null
+
+    # Install Python 3.11+ from deadsnakes PPA if needed
+    CURRENT_PYTHON=$(python3 --version 2>&1 | cut -d' ' -f2 | cut -d'.' -f1,2)
+    if [ "$(printf '%s\n' "3.11" "$CURRENT_PYTHON" | sort -V | head -n1)" != "3.11" ]; then
+        log_info "Installing Python 3.11 from deadsnakes PPA..."
+        add-apt-repository -y ppa:deadsnakes/ppa > /dev/null 2>&1
+        apt-get update -qq
+        apt-get install -y -qq python3.11 python3.11-venv python3.11-dev > /dev/null
+        PYTHON_CMD="python3.11"
+    else
+        apt-get install -y -qq python3 python3-venv python3-pip > /dev/null
+        PYTHON_CMD="python3"
+    fi
+
+    # Install Node.js 18+ from NodeSource if needed
+    CURRENT_NODE=$(node --version 2>&1 | cut -d'v' -f2 | cut -d'.' -f1 2>/dev/null || echo "0")
+    if [ "$CURRENT_NODE" -lt 18 ]; then
+        log_info "Installing Node.js 18 from NodeSource..."
+        curl -fsSL https://deb.nodesource.com/setup_18.x | bash - > /dev/null 2>&1
+        apt-get install -y -qq nodejs > /dev/null
+    else
+        apt-get install -y -qq nodejs npm > /dev/null 2>&1 || true
+    fi
+
     log_info "System packages installed"
 }
 
 check_python_version() {
-    PYTHON_VERSION=$(python3 --version 2>&1 | cut -d' ' -f2 | cut -d'.' -f1,2)
+    # Use specific python command if set, otherwise detect
+    if [ -z "$PYTHON_CMD" ]; then
+        if command -v python3.11 &> /dev/null; then
+            PYTHON_CMD="python3.11"
+        else
+            PYTHON_CMD="python3"
+        fi
+    fi
+
+    PYTHON_VERSION=$($PYTHON_CMD --version 2>&1 | cut -d' ' -f2 | cut -d'.' -f1,2)
     REQUIRED_VERSION="3.11"
     if [ "$(printf '%s\n' "$REQUIRED_VERSION" "$PYTHON_VERSION" | sort -V | head -n1)" != "$REQUIRED_VERSION" ]; then
         log_error "Python $REQUIRED_VERSION or higher is required (found $PYTHON_VERSION)"
         exit 1
     fi
-    log_info "Python $PYTHON_VERSION detected"
+    log_info "Python $PYTHON_VERSION detected ($PYTHON_CMD)"
 }
 
 check_node_version() {
@@ -131,7 +164,7 @@ copy_application_files() {
 setup_venv() {
     if [ ! -d "$INSTALL_DIR/.venv" ]; then
         log_info "Creating Python virtual environment..."
-        python3 -m venv "$INSTALL_DIR/.venv"
+        $PYTHON_CMD -m venv "$INSTALL_DIR/.venv"
     else
         log_info "Virtual environment exists"
     fi
