@@ -79,9 +79,14 @@ install_system_packages() {
     CURRENT_PYTHON=$(python3 --version 2>&1 | cut -d' ' -f2 | cut -d'.' -f1,2)
     if [ "$(printf '%s\n' "3.11" "$CURRENT_PYTHON" | sort -V | head -n1)" != "3.11" ]; then
         log_info "Installing Python 3.11 from deadsnakes PPA..."
-        add-apt-repository -y ppa:deadsnakes/ppa > /dev/null 2>&1
+        # Ensure add-apt-repository works properly
+        apt-get install -y -qq software-properties-common > /dev/null
+        DEBIAN_FRONTEND=noninteractive add-apt-repository -y ppa:deadsnakes/ppa
         apt-get update -qq
-        apt-get install -y -qq python3.11 python3.11-venv python3.11-dev > /dev/null
+        if ! apt-get install -y python3.11 python3.11-venv python3.11-dev; then
+            log_error "Failed to install Python 3.11. Please check your internet connection and try again."
+            exit 1
+        fi
         PYTHON_CMD="python3.11"
     else
         apt-get install -y -qq python3 python3-venv python3-pip > /dev/null
