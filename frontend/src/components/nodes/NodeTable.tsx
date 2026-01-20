@@ -1,16 +1,18 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { Link } from 'react-router-dom'
 import { cn } from '@/lib/utils'
-import { Badge, Button, Input } from '@/components/ui'
+import { Badge, Button, Input, Checkbox } from '@/components/ui'
 import { Search, ChevronUp, ChevronDown, Filter } from 'lucide-react'
 import { NODE_STATE_COLORS, NODE_STATE_LABELS, type Node, type NodeState } from '@/types'
+import { useSelectionStore } from '@/stores'
 
 interface NodeTableProps {
   nodes: Node[]
   isLoading?: boolean
   onStateFilter?: (state: NodeState | null) => void
   selectedState?: NodeState | null
+  enableSelection?: boolean
 }
 
 type SortField = 'hostname' | 'mac_address' | 'state' | 'arch' | 'last_seen_at'
@@ -49,11 +51,21 @@ export function NodeTable({
   isLoading,
   onStateFilter,
   selectedState,
+  enableSelection = true,
 }: NodeTableProps) {
   const parentRef = useRef<HTMLDivElement>(null)
   const [search, setSearch] = useState('')
   const [sortField, setSortField] = useState<SortField>('hostname')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
+
+  const {
+    selectedNodeIds,
+    isAllSelected,
+    toggleNode,
+    selectAll,
+    deselectAll,
+    setTotalNodes,
+  } = useSelectionStore()
 
   // Filter nodes by search
   const filteredNodes = nodes.filter((node) => {
@@ -98,6 +110,11 @@ export function NodeTable({
     return sortDirection === 'asc' ? cmp : -cmp
   })
 
+  // Update total nodes count for selection store
+  useEffect(() => {
+    setTotalNodes(sortedNodes.length)
+  }, [sortedNodes.length, setTotalNodes])
+
   const rowVirtualizer = useVirtualizer({
     count: sortedNodes.length,
     getScrollElement: () => parentRef.current,
@@ -114,6 +131,14 @@ export function NodeTable({
     }
   }
 
+  const handleSelectAll = () => {
+    if (isAllSelected) {
+      deselectAll()
+    } else {
+      selectAll(sortedNodes.map(n => n.id))
+    }
+  }
+
   const SortIcon = ({ field }: { field: SortField }) => {
     if (sortField !== field) return null
     return sortDirection === 'asc' ? (
@@ -127,6 +152,8 @@ export function NodeTable({
     'discovered', 'ignored', 'pending', 'installing', 'installed',
     'active', 'reprovision', 'migrating', 'retired', 'decommissioned', 'wiping'
   ]
+
+  const someSelected = selectedNodeIds.size > 0 && !isAllSelected
 
   return (
     <div className="space-y-4">
@@ -176,6 +203,15 @@ export function NodeTable({
       <div className="rounded-md border">
         {/* Header */}
         <div className="flex border-b bg-muted/50 text-sm font-medium">
+          {enableSelection && (
+            <div className="w-12 p-3 flex items-center justify-center">
+              <Checkbox
+                checked={isAllSelected}
+                indeterminate={someSelected}
+                onCheckedChange={handleSelectAll}
+              />
+            </div>
+          )}
           <button
             className="flex-1 p-3 text-left flex items-center gap-1 hover:bg-muted"
             onClick={() => handleSort('hostname')}
@@ -231,32 +267,51 @@ export function NodeTable({
             >
               {rowVirtualizer.getVirtualItems().map((virtualRow) => {
                 const node = sortedNodes[virtualRow.index]
+                const isSelected = selectedNodeIds.has(node.id)
                 return (
-                  <Link
+                  <div
                     key={node.id}
-                    to={`/nodes/${node.id}`}
-                    className="absolute left-0 right-0 flex items-center border-b last:border-0 hover:bg-muted/50"
+                    className={cn(
+                      'absolute left-0 right-0 flex items-center border-b last:border-0',
+                      isSelected ? 'bg-muted/50' : 'hover:bg-muted/30'
+                    )}
                     style={{
                       height: `${virtualRow.size}px`,
                       transform: `translateY(${virtualRow.start}px)`,
                     }}
                   >
-                    <div className="flex-1 p-3 text-sm font-medium truncate">
-                      {node.hostname || (
-                        <span className="text-muted-foreground">(undiscovered)</span>
-                      )}
-                    </div>
-                    <div className="w-40 p-3 text-sm font-mono text-muted-foreground">
-                      {node.mac_address}
-                    </div>
-                    <div className="w-32 p-3">
-                      <StateBadge state={node.state} />
-                    </div>
-                    <div className="w-24 p-3 text-sm">{node.arch}</div>
-                    <div className="w-28 p-3 text-sm text-muted-foreground">
-                      {formatLastSeen(node.last_seen_at)}
-                    </div>
-                  </Link>
+                    {enableSelection && (
+                      <div
+                        className="w-12 p-3 flex items-center justify-center"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Checkbox
+                          checked={isSelected}
+                          onCheckedChange={() => toggleNode(node.id)}
+                        />
+                      </div>
+                    )}
+                    <Link
+                      to={`/nodes/${node.id}`}
+                      className="flex-1 flex items-center"
+                    >
+                      <div className="flex-1 p-3 text-sm font-medium truncate">
+                        {node.hostname || (
+                          <span className="text-muted-foreground">(undiscovered)</span>
+                        )}
+                      </div>
+                      <div className="w-40 p-3 text-sm font-mono text-muted-foreground">
+                        {node.mac_address}
+                      </div>
+                      <div className="w-32 p-3">
+                        <StateBadge state={node.state} />
+                      </div>
+                      <div className="w-24 p-3 text-sm">{node.arch}</div>
+                      <div className="w-28 p-3 text-sm text-muted-foreground">
+                        {formatLastSeen(node.last_seen_at)}
+                      </div>
+                    </Link>
+                  </div>
                 )
               })}
             </div>
@@ -267,6 +322,7 @@ export function NodeTable({
       {/* Footer with count */}
       <div className="text-sm text-muted-foreground">
         Showing {sortedNodes.length} of {nodes.length} nodes
+        {selectedNodeIds.size > 0 && ` · ${selectedNodeIds.size} selected`}
       </div>
     </div>
   )

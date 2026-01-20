@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Card, CardContent, CardHeader, Button } from '@/components/ui'
 import { Plus, RefreshCw } from 'lucide-react'
-import { NodeTable } from '@/components/nodes/NodeTable'
+import { NodeTable, BulkActionBar } from '@/components/nodes'
 import { useNodes } from '@/hooks'
 import type { NodeState } from '@/types'
 
@@ -42,9 +42,12 @@ export function Nodes() {
             isLoading={isLoading}
             onStateFilter={setStateFilter}
             selectedState={stateFilter}
+            enableSelection={true}
           />
         </CardContent>
       </Card>
+
+      <BulkActionBar />
     </div>
   )
 }
