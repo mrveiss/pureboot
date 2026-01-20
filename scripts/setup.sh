@@ -108,18 +108,24 @@ install_system_packages() {
     CURRENT_NODE=$(node --version 2>&1 | cut -d'v' -f2 | cut -d'.' -f1 2>/dev/null || echo "0")
     if [ "$CURRENT_NODE" -lt 18 ]; then
         log_info "Installing Node.js 18 from NodeSource..."
-        # Fix any broken packages first
-        apt-get -f install -y > /dev/null 2>&1 || true
-        dpkg --configure -a > /dev/null 2>&1 || true
 
+        # Remove conflicting Ubuntu packages that interfere with NodeSource
+        log_info "Removing conflicting packages..."
+        apt-get remove -y libnode-dev libnode72 nodejs-doc > /dev/null 2>&1 || true
+        apt-get autoremove -y > /dev/null 2>&1 || true
+
+        # Fix any broken packages
+        dpkg --configure -a > /dev/null 2>&1 || true
+        apt-get -f install -y > /dev/null 2>&1 || true
+
+        # Install from NodeSource
         curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
         if ! apt-get install -y nodejs; then
-            log_error "Failed to install Node.js 18. Trying alternative method..."
-            # Try installing from Ubuntu repos as fallback
-            apt-get install -y nodejs npm || true
+            log_error "Failed to install Node.js 18"
+            exit 1
         fi
     else
-        apt-get install -y -qq nodejs npm > /dev/null 2>&1 || true
+        log_info "Node.js $CURRENT_NODE already installed"
     fi
 
     log_info "System packages installed"
