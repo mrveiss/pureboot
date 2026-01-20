@@ -1,6 +1,6 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { AppShell } from '@/components/layout'
-import { Dashboard, Login, Nodes, NodeDetail, NotFound } from '@/pages'
+import { Dashboard, Login, Nodes, NodeDetail, Groups, GroupDetail, NotFound } from '@/pages'
 import { useAuthStore } from '@/stores'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -43,7 +43,8 @@ export const router = createBrowserRouter([
       { index: true, element: <Dashboard /> },
       { path: 'nodes', element: <Nodes /> },
       { path: 'nodes/:nodeId', element: <NodeDetail /> },
-      { path: 'groups', element: <div>Device Groups (Coming Soon)</div> },
+      { path: 'groups', element: <Groups /> },
+      { path: 'groups/:groupId', element: <GroupDetail /> },
       { path: 'workflows', element: <div>Workflows (Coming Soon)</div> },
       { path: 'templates', element: <div>Templates (Coming Soon)</div> },
       { path: 'hypervisors', element: <div>Hypervisors (Coming Soon)</div> },
