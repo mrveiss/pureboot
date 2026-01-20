@@ -1,4 +1,6 @@
 """Node management API endpoints."""
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +10,7 @@ from src.api.schemas import (
     ApiListResponse,
     ApiResponse,
     NodeCreate,
+    NodeReport,
     NodeResponse,
     NodeUpdate,
     StateTransition,
@@ -255,4 +258,53 @@ async def remove_node_tag(
     return ApiResponse(
         data=NodeResponse.from_node(node),
         message=f"Tag '{tag}' removed",
+    )
+
+
+@router.post("/report", response_model=ApiResponse[NodeResponse])
+async def report_node_status(
+    report: NodeReport,
+    db: AsyncSession = Depends(get_db),
+):
+    """Report node status and update information.
+
+    Called by nodes to report their current status and update
+    hardware information after OS boot.
+    """
+    # Look up node by MAC
+    result = await db.execute(
+        select(Node)
+        .options(selectinload(Node.tags))
+        .where(Node.mac_address == report.mac_address)
+    )
+    node = result.scalar_one_or_none()
+
+    if not node:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Node with MAC {report.mac_address} not found",
+        )
+
+    # Update node information
+    node.last_seen_at = datetime.utcnow()
+
+    if report.ip_address:
+        node.ip_address = report.ip_address
+    if report.hostname:
+        node.hostname = report.hostname
+    if report.vendor:
+        node.vendor = report.vendor
+    if report.model:
+        node.model = report.model
+    if report.serial_number:
+        node.serial_number = report.serial_number
+    if report.system_uuid:
+        node.system_uuid = report.system_uuid
+
+    await db.flush()
+    await db.refresh(node, ["tags"])
+
+    return ApiResponse(
+        data=NodeResponse.from_node(node),
+        message="Status reported successfully",
     )
