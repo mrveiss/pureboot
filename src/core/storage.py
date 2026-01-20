@@ -451,6 +451,137 @@ class HttpBackendService:
         # We'd need to crawl the directory listing
         return {"used_bytes": 0, "total_bytes": None, "file_count": 0}
 
+    def supports_write(self) -> bool:
+        return False
+
+    async def list_files(self, path: str) -> list[FileInfo]:
+        """List files by parsing HTTP directory index."""
+        if ".." in path:
+            raise ValueError("Path traversal not allowed")
+
+        url = f"{self.base_url}{path}"
+        if not url.endswith("/"):
+            url += "/"
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url,
+                    auth=self._get_auth(),
+                    headers=self._get_headers(),
+                    timeout=aiohttp.ClientTimeout(total=30),
+                ) as resp:
+                    if resp.status == 404:
+                        raise FileNotFoundError(f"Path not found: {path}")
+                    if resp.status >= 400:
+                        raise ValueError(f"HTTP error: {resp.status}")
+
+                    html = await resp.text()
+                    return self._parse_directory_listing(html, path)
+        except aiohttp.ClientError as e:
+            raise ValueError(f"HTTP request failed: {str(e)}")
+
+    def _parse_directory_listing(self, html: str, base_path: str) -> list[FileInfo]:
+        """Parse Apache/nginx style directory listing."""
+        import re
+        files = []
+
+        # Match common directory listing patterns
+        # Apache: <a href="filename">filename</a>
+        # nginx: <a href="filename">filename</a>  date  size
+        pattern = r'<a\s+href="([^"]+)"[^>]*>([^<]+)</a>'
+
+        for match in re.finditer(pattern, html, re.IGNORECASE):
+            href = match.group(1)
+            name = match.group(2).strip()
+
+            # Skip parent directory and special links
+            if name in ("../", "..", "Parent Directory", "Name", ""):
+                continue
+            if href.startswith("?") or href.startswith("/"):
+                continue
+
+            # Determine if directory
+            is_dir = href.endswith("/")
+            clean_name = name.rstrip("/")
+
+            # Build path
+            if base_path == "/":
+                file_path = f"/{clean_name}"
+            else:
+                file_path = f"{base_path.rstrip('/')}/{clean_name}"
+
+            if is_dir:
+                files.append(FileInfo(
+                    name=clean_name,
+                    path=file_path,
+                    file_type="directory",
+                ))
+            else:
+                mime_type, _ = mimetypes.guess_type(clean_name)
+                files.append(FileInfo(
+                    name=clean_name,
+                    path=file_path,
+                    file_type="file",
+                    mime_type=mime_type,
+                ))
+
+        return sorted(files, key=lambda f: (f.type != "directory", f.name.lower()))
+
+    async def download_file(self, path: str) -> tuple[AsyncIterator[bytes], str, int]:
+        """Download file from HTTP backend."""
+        if ".." in path:
+            raise ValueError("Path traversal not allowed")
+
+        url = f"{self.base_url}{path}"
+
+        try:
+            session = aiohttp.ClientSession()
+            resp = await session.get(
+                url,
+                auth=self._get_auth(),
+                headers=self._get_headers(),
+                timeout=aiohttp.ClientTimeout(total=300),
+            )
+
+            if resp.status == 404:
+                await session.close()
+                raise FileNotFoundError(f"File not found: {path}")
+            if resp.status >= 400:
+                await session.close()
+                raise ValueError(f"HTTP error: {resp.status}")
+
+            content_type = resp.headers.get("Content-Type", "application/octet-stream")
+            content_length = int(resp.headers.get("Content-Length", 0))
+
+            async def content_iterator():
+                try:
+                    async for chunk in resp.content.iter_chunked(8192):
+                        yield chunk
+                finally:
+                    await resp.release()
+                    await session.close()
+
+            return content_iterator(), content_type, content_length
+        except aiohttp.ClientError as e:
+            raise ValueError(f"HTTP download failed: {str(e)}")
+
+    async def upload_file(self, path: str, filename: str, content: AsyncIterator[bytes]) -> FileInfo:
+        """HTTP backends are read-only."""
+        raise ValueError("HTTP backends are read-only")
+
+    async def delete_files(self, paths: list[str]) -> int:
+        """HTTP backends are read-only."""
+        raise ValueError("HTTP backends are read-only")
+
+    async def create_folder(self, path: str) -> FileInfo:
+        """HTTP backends are read-only."""
+        raise ValueError("HTTP backends are read-only")
+
+    async def move_file(self, source: str, destination: str) -> FileInfo:
+        """HTTP backends are read-only."""
+        raise ValueError("HTTP backends are read-only")
+
 
 class S3BackendService:
     """S3 backend operations (stub)."""
