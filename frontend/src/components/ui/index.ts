@@ -21,3 +21,4 @@ export {
   SelectItem,
 } from './select'
 export { Separator } from './separator'
+export { Tabs, TabsList, TabsTrigger, TabsContent } from './tabs'
