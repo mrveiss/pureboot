@@ -1,0 +1,281 @@
+import { useParams, Link } from 'react-router-dom'
+import { ArrowLeft, Server, Clock, Cpu, HardDrive, Network, Tag } from 'lucide-react'
+import { Button, Card, CardContent, CardHeader, CardTitle, Badge, Separator } from '@/components/ui'
+import { StateMachine } from '@/components/nodes/StateMachine'
+import { useNode, useUpdateNodeState } from '@/hooks'
+import { NODE_STATE_COLORS, NODE_STATE_LABELS, NODE_STATE_TRANSITIONS, type NodeState } from '@/types'
+import { cn } from '@/lib/utils'
+
+function formatDate(dateStr: string | null): string {
+  if (!dateStr) return 'N/A'
+  return new Date(dateStr).toLocaleString()
+}
+
+export function NodeDetail() {
+  const { nodeId } = useParams<{ nodeId: string }>()
+  const { data: response, isLoading, error } = useNode(nodeId ?? '')
+  const updateState = useUpdateNodeState()
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-muted-foreground">Loading node details...</div>
+      </div>
+    )
+  }
+
+  if (error || !response?.data) {
+    return (
+      <div className="space-y-4">
+        <Button variant="ghost" asChild>
+          <Link to="/nodes">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Nodes
+          </Link>
+        </Button>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-center text-destructive">
+              {error instanceof Error ? error.message : 'Node not found'}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  const node = response.data
+  const validTransitions = NODE_STATE_TRANSITIONS[node.state] ?? []
+
+  const handleStateTransition = (newState: NodeState) => {
+    if (!validTransitions.includes(newState)) return
+
+    // For wiping, would need confirmation dialog - simplified for now
+    if (newState === 'wiping') {
+      if (!confirm('This will securely erase all data on this node. Are you sure?')) {
+        return
+      }
+    }
+
+    updateState.mutate({ nodeId: node.id, newState })
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" asChild>
+            <Link to="/nodes">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back
+            </Link>
+          </Button>
+          <div>
+            <h2 className="text-2xl font-bold">
+              {node.hostname || node.mac_address}
+            </h2>
+            <p className="text-muted-foreground">
+              {node.hostname ? node.mac_address : 'Hostname not assigned'}
+            </p>
+          </div>
+        </div>
+        <Badge
+          variant="outline"
+          className={cn('text-lg px-4 py-1 border-0 text-white', NODE_STATE_COLORS[node.state])}
+        >
+          {NODE_STATE_LABELS[node.state]}
+        </Badge>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Left column - Node info */}
+        <div className="space-y-6">
+          {/* Basic Info */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Server className="h-5 w-5" />
+                Node Information
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <div className="text-muted-foreground">Hostname</div>
+                  <div className="font-medium">{node.hostname || 'Not assigned'}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">IP Address</div>
+                  <div className="font-medium font-mono">{node.ip_address || 'N/A'}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">MAC Address</div>
+                  <div className="font-medium font-mono">{node.mac_address}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">System UUID</div>
+                  <div className="font-medium font-mono text-xs">{node.system_uuid || 'N/A'}</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Hardware Info */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Cpu className="h-5 w-5" />
+                Hardware
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <div className="text-muted-foreground">Architecture</div>
+                  <div className="font-medium">{node.arch}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Boot Mode</div>
+                  <div className="font-medium uppercase">{node.boot_mode}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Vendor</div>
+                  <div className="font-medium">{node.vendor || 'Unknown'}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Model</div>
+                  <div className="font-medium">{node.model || 'Unknown'}</div>
+                </div>
+                <div className="col-span-2">
+                  <div className="text-muted-foreground">Serial Number</div>
+                  <div className="font-medium font-mono">{node.serial_number || 'N/A'}</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Timestamps */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Clock className="h-5 w-5" />
+                Timeline
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 gap-4 text-sm">
+                <div>
+                  <div className="text-muted-foreground">First Discovered</div>
+                  <div className="font-medium">{formatDate(node.created_at)}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Last Updated</div>
+                  <div className="font-medium">{formatDate(node.updated_at)}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Last Seen</div>
+                  <div className="font-medium">{formatDate(node.last_seen_at)}</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Tags */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Tag className="h-5 w-5" />
+                Tags
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {node.tags.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {node.tags.map((tag) => (
+                    <Badge key={tag} variant="secondary">{tag}</Badge>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-muted-foreground text-sm">No tags assigned</div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Right column - State machine */}
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Network className="h-5 w-5" />
+                State Machine
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <StateMachine
+                currentState={node.state}
+                onStateClick={handleStateTransition}
+                highlightTransitions={true}
+              />
+
+              <Separator className="my-4" />
+
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Available Transitions</div>
+                {validTransitions.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {validTransitions.map((state) => (
+                      <Button
+                        key={state}
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleStateTransition(state)}
+                        disabled={updateState.isPending}
+                        className={cn(
+                          'hover:text-white',
+                          `hover:${NODE_STATE_COLORS[state]}`
+                        )}
+                      >
+                        Transition to {NODE_STATE_LABELS[state]}
+                      </Button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-muted-foreground text-sm">
+                    No transitions available from this state
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Workflow assignment placeholder */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <HardDrive className="h-5 w-5" />
+                Workflow
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {node.workflow_id ? (
+                <div className="text-sm">
+                  <span className="text-muted-foreground">Assigned: </span>
+                  <span className="font-medium">{node.workflow_id}</span>
+                </div>
+              ) : (
+                <div className="text-muted-foreground text-sm">
+                  No workflow assigned
+                </div>
+              )}
+              <Button variant="outline" size="sm" className="mt-4" disabled>
+                Assign Workflow (Coming Soon)
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  )
+}
