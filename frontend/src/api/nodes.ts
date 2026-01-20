@@ -1,0 +1,78 @@
+import { apiClient } from './client'
+import type {
+  ApiResponse,
+  ApiListResponse,
+  Node,
+  DeviceGroup,
+  NodeFilterParams
+} from '@/types'
+
+export const nodesApi = {
+  async list(params?: NodeFilterParams): Promise<ApiListResponse<Node>> {
+    const queryParams: Record<string, string> = {}
+    if (params?.state) queryParams.state = params.state
+    if (params?.group_id) queryParams.group_id = params.group_id
+    if (params?.tag) queryParams.tag = params.tag
+    if (params?.search) queryParams.search = params.search
+    if (params?.page) queryParams.page = String(params.page)
+    if (params?.limit) queryParams.limit = String(params.limit)
+
+    return apiClient.get<ApiListResponse<Node>>('/nodes', queryParams)
+  },
+
+  async get(nodeId: string): Promise<ApiResponse<Node>> {
+    return apiClient.get<ApiResponse<Node>>(`/nodes/${nodeId}`)
+  },
+
+  async create(data: Partial<Node>): Promise<ApiResponse<Node>> {
+    return apiClient.post<ApiResponse<Node>>('/nodes', data)
+  },
+
+  async update(nodeId: string, data: Partial<Node>): Promise<ApiResponse<Node>> {
+    return apiClient.patch<ApiResponse<Node>>(`/nodes/${nodeId}`, data)
+  },
+
+  async updateState(nodeId: string, newState: string): Promise<ApiResponse<Node>> {
+    return apiClient.patch<ApiResponse<Node>>(`/nodes/${nodeId}/state`, {
+      new_state: newState
+    })
+  },
+
+  async delete(nodeId: string): Promise<ApiResponse<null>> {
+    return apiClient.delete<ApiResponse<null>>(`/nodes/${nodeId}`)
+  },
+
+  async addTag(nodeId: string, tag: string): Promise<ApiResponse<Node>> {
+    return apiClient.post<ApiResponse<Node>>(`/nodes/${nodeId}/tags`, { tag })
+  },
+
+  async removeTag(nodeId: string, tag: string): Promise<ApiResponse<Node>> {
+    return apiClient.delete<ApiResponse<Node>>(`/nodes/${nodeId}/tags/${tag}`)
+  },
+}
+
+export const groupsApi = {
+  async list(): Promise<ApiListResponse<DeviceGroup>> {
+    return apiClient.get<ApiListResponse<DeviceGroup>>('/groups')
+  },
+
+  async get(groupId: string): Promise<ApiResponse<DeviceGroup>> {
+    return apiClient.get<ApiResponse<DeviceGroup>>(`/groups/${groupId}`)
+  },
+
+  async create(data: Partial<DeviceGroup>): Promise<ApiResponse<DeviceGroup>> {
+    return apiClient.post<ApiResponse<DeviceGroup>>('/groups', data)
+  },
+
+  async update(groupId: string, data: Partial<DeviceGroup>): Promise<ApiResponse<DeviceGroup>> {
+    return apiClient.patch<ApiResponse<DeviceGroup>>(`/groups/${groupId}`, data)
+  },
+
+  async delete(groupId: string): Promise<ApiResponse<null>> {
+    return apiClient.delete<ApiResponse<null>>(`/groups/${groupId}`)
+  },
+
+  async getNodes(groupId: string): Promise<ApiListResponse<Node>> {
+    return apiClient.get<ApiListResponse<Node>>(`/groups/${groupId}/nodes`)
+  },
+}
