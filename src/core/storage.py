@@ -2,11 +2,13 @@
 import asyncio
 import json
 import logging
+import mimetypes
 import os
 import shutil
 import subprocess
+from datetime import datetime
 from pathlib import Path
-from typing import Protocol
+from typing import AsyncIterator, Protocol
 
 import aiohttp
 
@@ -30,6 +32,70 @@ class StorageBackendService(Protocol):
 
     async def unmount(self) -> None:
         """Unmount the backend (if applicable)."""
+        ...
+
+
+class FileInfo:
+    """File information data class."""
+    def __init__(
+        self,
+        name: str,
+        path: str,
+        file_type: str,
+        size: int | None = None,
+        mime_type: str | None = None,
+        modified_at: datetime | None = None,
+        item_count: int | None = None,
+    ):
+        self.name = name
+        self.path = path
+        self.type = file_type
+        self.size = size
+        self.mime_type = mime_type
+        self.modified_at = modified_at
+        self.item_count = item_count
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "path": self.path,
+            "type": self.type,
+            "size": self.size,
+            "mime_type": self.mime_type,
+            "modified_at": self.modified_at,
+            "item_count": self.item_count,
+        }
+
+
+class FileBrowserService(Protocol):
+    """Protocol for file browser operations."""
+
+    async def list_files(self, path: str) -> list[FileInfo]:
+        """List files at the given path."""
+        ...
+
+    async def download_file(self, path: str) -> tuple[AsyncIterator[bytes], str, int]:
+        """Download file. Returns (content_iterator, mime_type, size)."""
+        ...
+
+    async def upload_file(self, path: str, filename: str, content: AsyncIterator[bytes]) -> FileInfo:
+        """Upload file to the given path."""
+        ...
+
+    async def delete_files(self, paths: list[str]) -> int:
+        """Delete files/folders. Returns count of deleted items."""
+        ...
+
+    async def create_folder(self, path: str) -> FileInfo:
+        """Create a folder at the given path."""
+        ...
+
+    async def move_file(self, source: str, destination: str) -> FileInfo:
+        """Move file from source to destination."""
+        ...
+
+    def supports_write(self) -> bool:
+        """Return True if backend supports write operations."""
         ...
 
 
