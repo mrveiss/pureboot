@@ -8,3 +8,4 @@ export {
   useUpdateNode,
   nodeKeys,
 } from './useNodes'
+export { useNodeUpdates } from './useNodeUpdates'
