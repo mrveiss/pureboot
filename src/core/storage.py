@@ -215,6 +215,186 @@ class NfsBackendService:
             logger.error(f"Failed to get NFS stats: {e}")
             return {"used_bytes": 0, "total_bytes": None, "file_count": 0}
 
+    def supports_write(self) -> bool:
+        return True
+
+    def _validate_path(self, path: str) -> Path:
+        """Validate and resolve path within mount point."""
+        if ".." in path:
+            raise ValueError("Path traversal not allowed")
+        clean_path = path.lstrip("/")
+        full_path = self.mount_point / clean_path
+        # Ensure path is within mount point
+        try:
+            full_path.resolve().relative_to(self.mount_point.resolve())
+        except ValueError:
+            raise ValueError("Path outside storage root")
+        return full_path
+
+    async def list_files(self, path: str) -> list[FileInfo]:
+        """List files at the given path."""
+        if not os.path.ismount(str(self.mount_point)):
+            await self.mount()
+
+        target = self._validate_path(path)
+        if not target.exists():
+            raise FileNotFoundError(f"Path not found: {path}")
+        if not target.is_dir():
+            raise ValueError(f"Not a directory: {path}")
+
+        files = []
+        for item in target.iterdir():
+            stat = item.stat()
+            rel_path = "/" + str(item.relative_to(self.mount_point))
+
+            if item.is_dir():
+                item_count = sum(1 for _ in item.iterdir())
+                files.append(FileInfo(
+                    name=item.name,
+                    path=rel_path,
+                    file_type="directory",
+                    modified_at=datetime.fromtimestamp(stat.st_mtime),
+                    item_count=item_count,
+                ))
+            else:
+                mime_type, _ = mimetypes.guess_type(item.name)
+                files.append(FileInfo(
+                    name=item.name,
+                    path=rel_path,
+                    file_type="file",
+                    size=stat.st_size,
+                    mime_type=mime_type,
+                    modified_at=datetime.fromtimestamp(stat.st_mtime),
+                ))
+
+        return sorted(files, key=lambda f: (f.type != "directory", f.name.lower()))
+
+    async def download_file(self, path: str) -> tuple[AsyncIterator[bytes], str, int]:
+        """Download file."""
+        if not os.path.ismount(str(self.mount_point)):
+            await self.mount()
+
+        target = self._validate_path(path)
+        if not target.exists():
+            raise FileNotFoundError(f"File not found: {path}")
+        if not target.is_file():
+            raise ValueError(f"Not a file: {path}")
+
+        mime_type, _ = mimetypes.guess_type(target.name)
+        size = target.stat().st_size
+
+        async def file_iterator():
+            with open(target, "rb") as f:
+                while chunk := f.read(8192):
+                    yield chunk
+
+        return file_iterator(), mime_type or "application/octet-stream", size
+
+    async def upload_file(self, path: str, filename: str, content: AsyncIterator[bytes]) -> FileInfo:
+        """Upload file."""
+        if not os.path.ismount(str(self.mount_point)):
+            await self.mount()
+
+        target_dir = self._validate_path(path)
+        if not target_dir.exists():
+            raise FileNotFoundError(f"Directory not found: {path}")
+
+        # Validate filename
+        if "/" in filename or ".." in filename:
+            raise ValueError("Invalid filename")
+
+        target_file = target_dir / filename
+
+        with open(target_file, "wb") as f:
+            async for chunk in content:
+                f.write(chunk)
+
+        stat = target_file.stat()
+        mime_type, _ = mimetypes.guess_type(filename)
+        rel_path = "/" + str(target_file.relative_to(self.mount_point))
+
+        return FileInfo(
+            name=filename,
+            path=rel_path,
+            file_type="file",
+            size=stat.st_size,
+            mime_type=mime_type,
+            modified_at=datetime.fromtimestamp(stat.st_mtime),
+        )
+
+    async def delete_files(self, paths: list[str]) -> int:
+        """Delete files/folders recursively."""
+        if not os.path.ismount(str(self.mount_point)):
+            await self.mount()
+
+        deleted = 0
+        for path in paths:
+            target = self._validate_path(path)
+            if target.exists():
+                if target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+                deleted += 1
+
+        return deleted
+
+    async def create_folder(self, path: str) -> FileInfo:
+        """Create a folder."""
+        if not os.path.ismount(str(self.mount_point)):
+            await self.mount()
+
+        target = self._validate_path(path)
+        if target.exists():
+            raise ValueError(f"Path already exists: {path}")
+
+        target.mkdir(parents=True)
+        stat = target.stat()
+
+        return FileInfo(
+            name=target.name,
+            path=path,
+            file_type="directory",
+            modified_at=datetime.fromtimestamp(stat.st_mtime),
+            item_count=0,
+        )
+
+    async def move_file(self, source: str, destination: str) -> FileInfo:
+        """Move file or folder."""
+        if not os.path.ismount(str(self.mount_point)):
+            await self.mount()
+
+        src = self._validate_path(source)
+        dst = self._validate_path(destination)
+
+        if not src.exists():
+            raise FileNotFoundError(f"Source not found: {source}")
+        if dst.exists():
+            raise ValueError(f"Destination already exists: {destination}")
+
+        shutil.move(str(src), str(dst))
+        stat = dst.stat()
+
+        if dst.is_dir():
+            item_count = sum(1 for _ in dst.iterdir())
+            return FileInfo(
+                name=dst.name,
+                path=destination,
+                file_type="directory",
+                modified_at=datetime.fromtimestamp(stat.st_mtime),
+                item_count=item_count,
+            )
+        else:
+            mime_type, _ = mimetypes.guess_type(dst.name)
+            return FileInfo(
+                name=dst.name,
+                path=destination,
+                file_type="file",
+                size=stat.st_size,
+                mime_type=mime_type,
+                modified_at=datetime.fromtimestamp(stat.st_mtime),
+            )
+
 
 class HttpBackendService:
     """HTTP backend operations."""
