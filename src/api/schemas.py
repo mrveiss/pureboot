@@ -1,4 +1,5 @@
 """Pydantic schemas for API request/response validation."""
+import json
 import re
 from datetime import datetime
 from typing import Generic, TypeVar
@@ -305,7 +306,7 @@ class HttpConfig(BaseModel):
     def validate_auth_method(cls, v: str) -> str:
         valid = {"none", "basic", "bearer"}
         if v not in valid:
-            raise ValueError(f"Auth method must be one of {valid}")
+            raise ValueError(f"Auth method must be one of: {', '.join(sorted(valid))}")
         return v
 
 
@@ -348,7 +349,7 @@ class StorageBackendCreate(BaseModel):
     def validate_type(cls, v: str) -> str:
         valid = {"nfs", "iscsi", "s3", "http"}
         if v not in valid:
-            raise ValueError(f"Type must be one of {valid}")
+            raise ValueError(f"Type must be one of: {', '.join(sorted(valid))}")
         return v
 
 
@@ -385,8 +386,6 @@ class StorageBackendResponse(BaseModel):
     @classmethod
     def from_backend(cls, backend) -> "StorageBackendResponse":
         """Create response from StorageBackend model."""
-        import json
-
         config = json.loads(backend.config_json)
         # Remove sensitive fields from config
         config.pop("password", None)
