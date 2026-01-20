@@ -1,4 +1,5 @@
 """Pydantic schemas for API request/response validation."""
+import json
 import re
 from datetime import datetime
 from typing import Generic, TypeVar
@@ -258,3 +259,156 @@ class ApiErrorResponse(BaseModel):
     success: bool = False
     error: str
     detail: str | None = None
+
+
+# ============== Storage Backend Schemas ==============
+
+
+class NfsConfig(BaseModel):
+    """NFS backend configuration."""
+
+    server: str
+    export_path: str
+    mount_options: str | None = "vers=4.1"
+
+    @field_validator("server")
+    @classmethod
+    def validate_server(cls, v: str) -> str:
+        if not v or len(v) > 255:
+            raise ValueError("Server must be 1-255 characters")
+        return v
+
+    @field_validator("export_path")
+    @classmethod
+    def validate_export_path(cls, v: str) -> str:
+        if not v.startswith("/"):
+            raise ValueError("Export path must start with /")
+        return v
+
+
+class HttpConfig(BaseModel):
+    """HTTP backend configuration."""
+
+    base_url: str
+    auth_method: str = "none"  # none, basic, bearer
+    username: str | None = None
+    password: str | None = None
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, v: str) -> str:
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("Base URL must start with http:// or https://")
+        return v.rstrip("/")
+
+    @field_validator("auth_method")
+    @classmethod
+    def validate_auth_method(cls, v: str) -> str:
+        valid = {"none", "basic", "bearer"}
+        if v not in valid:
+            raise ValueError(f"Auth method must be one of: {', '.join(sorted(valid))}")
+        return v
+
+
+class S3Config(BaseModel):
+    """S3 backend configuration (stub)."""
+
+    endpoint: str
+    bucket: str
+    region: str | None = None
+    access_key_id: str
+    secret_access_key: str | None = None
+    cdn_enabled: bool = False
+    cdn_url: str | None = None
+
+
+class IscsiTargetConfig(BaseModel):
+    """iSCSI target configuration (stub)."""
+
+    target: str
+    port: int = 3260
+    chap_enabled: bool = False
+
+
+class StorageBackendCreate(BaseModel):
+    """Schema for creating a storage backend."""
+
+    name: str
+    type: str
+    config: dict
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not v or len(v) > 100:
+            raise ValueError("Name must be 1-100 characters")
+        return v
+
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, v: str) -> str:
+        valid = {"nfs", "iscsi", "s3", "http"}
+        if v not in valid:
+            raise ValueError(f"Type must be one of: {', '.join(sorted(valid))}")
+        return v
+
+
+class StorageBackendUpdate(BaseModel):
+    """Schema for updating a storage backend."""
+
+    name: str | None = None
+    config: dict | None = None
+
+
+class StorageBackendStats(BaseModel):
+    """Storage backend statistics."""
+
+    used_bytes: int
+    total_bytes: int | None
+    file_count: int
+    template_count: int = 0
+
+
+class StorageBackendResponse(BaseModel):
+    """Schema for storage backend response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    type: str
+    status: str
+    config: dict
+    stats: StorageBackendStats
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_backend(cls, backend) -> "StorageBackendResponse":
+        """Create response from StorageBackend model."""
+        config = json.loads(backend.config_json)
+        # Remove sensitive fields from config
+        config.pop("password", None)
+        config.pop("secret_access_key", None)
+
+        return cls(
+            id=backend.id,
+            name=backend.name,
+            type=backend.type,
+            status=backend.status,
+            config=config,
+            stats=StorageBackendStats(
+                used_bytes=backend.used_bytes,
+                total_bytes=backend.total_bytes,
+                file_count=backend.file_count,
+            ),
+            created_at=backend.created_at,
+            updated_at=backend.updated_at,
+        )
+
+
+class StorageTestResult(BaseModel):
+    """Result of storage backend connection test."""
+
+    success: bool
+    message: str
