@@ -584,14 +584,29 @@ class HttpBackendService:
 
 
 class S3BackendService:
-    """S3 backend operations (stub)."""
+    """S3 backend operations."""
 
     def __init__(self, backend_id: str, config: dict):
         self.backend_id = backend_id
         self.config = config
+        self.endpoint = config["endpoint"]
+        self.bucket = config["bucket"]
+
+    def supports_write(self) -> bool:
+        return True
 
     async def test_connection(self) -> tuple[bool, str]:
-        return False, "S3 backend not yet implemented"
+        """Test S3 connectivity."""
+        url = f"{self.endpoint}/{self.bucket}?list-type=2&max-keys=1"
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status < 400:
+                        return True, f"S3 bucket accessible"
+                    return False, f"S3 error: {resp.status}"
+        except aiohttp.ClientError as e:
+            return False, f"S3 connection failed: {str(e)}"
 
     async def mount(self) -> str | None:
         return None
@@ -601,6 +616,224 @@ class S3BackendService:
 
     async def get_stats(self) -> dict:
         return {"used_bytes": 0, "total_bytes": None, "file_count": 0}
+
+    async def list_files(self, path: str) -> list[FileInfo]:
+        """List files in S3 bucket."""
+        if ".." in path:
+            raise ValueError("Path traversal not allowed")
+
+        prefix = path.lstrip("/")
+        if prefix and not prefix.endswith("/"):
+            prefix += "/"
+        if prefix == "/":
+            prefix = ""
+
+        url = f"{self.endpoint}/{self.bucket}?list-type=2&prefix={prefix}&delimiter=/"
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status >= 400:
+                        raise ValueError(f"S3 error: {resp.status}")
+
+                    xml_content = await resp.text()
+                    return self._parse_s3_listing(xml_content, path)
+        except aiohttp.ClientError as e:
+            raise ValueError(f"S3 request failed: {str(e)}")
+
+    def _parse_s3_listing(self, xml_content: str, base_path: str) -> list[FileInfo]:
+        """Parse S3 ListObjectsV2 XML response."""
+        import re
+        files = []
+
+        # Parse common prefixes (directories)
+        for match in re.finditer(r'<CommonPrefixes><Prefix>([^<]+)</Prefix></CommonPrefixes>', xml_content):
+            prefix = match.group(1)
+            name = prefix.rstrip("/").split("/")[-1]
+            if name:
+                files.append(FileInfo(
+                    name=name,
+                    path=f"/{prefix.rstrip('/')}",
+                    file_type="directory",
+                ))
+
+        # Parse contents (files)
+        for match in re.finditer(r'<Contents>.*?<Key>([^<]+)</Key>.*?<Size>([^<]+)</Size>.*?</Contents>', xml_content, re.DOTALL):
+            key = match.group(1)
+            size = int(match.group(2))
+
+            # Skip directory markers
+            if key.endswith("/"):
+                continue
+
+            name = key.split("/")[-1]
+            mime_type, _ = mimetypes.guess_type(name)
+
+            files.append(FileInfo(
+                name=name,
+                path=f"/{key}",
+                file_type="file",
+                size=size,
+                mime_type=mime_type,
+            ))
+
+        return sorted(files, key=lambda f: (f.type != "directory", f.name.lower()))
+
+    async def download_file(self, path: str) -> tuple[AsyncIterator[bytes], str, int]:
+        """Download file from S3."""
+        if ".." in path:
+            raise ValueError("Path traversal not allowed")
+
+        key = path.lstrip("/")
+        url = f"{self.endpoint}/{self.bucket}/{key}"
+
+        try:
+            session = aiohttp.ClientSession()
+            resp = await session.get(url, timeout=aiohttp.ClientTimeout(total=300))
+
+            if resp.status == 404:
+                await session.close()
+                raise FileNotFoundError(f"File not found: {path}")
+            if resp.status >= 400:
+                await session.close()
+                raise ValueError(f"S3 error: {resp.status}")
+
+            content_type = resp.headers.get("Content-Type", "application/octet-stream")
+            content_length = int(resp.headers.get("Content-Length", 0))
+
+            async def content_iterator():
+                try:
+                    async for chunk in resp.content.iter_chunked(8192):
+                        yield chunk
+                finally:
+                    await resp.release()
+                    await session.close()
+
+            return content_iterator(), content_type, content_length
+        except aiohttp.ClientError as e:
+            raise ValueError(f"S3 download failed: {str(e)}")
+
+    async def upload_file(self, path: str, filename: str, content: AsyncIterator[bytes]) -> FileInfo:
+        """Upload file to S3."""
+        if ".." in path or ".." in filename:
+            raise ValueError("Path traversal not allowed")
+
+        # Build key
+        base = path.lstrip("/").rstrip("/")
+        key = f"{base}/{filename}" if base else filename
+        url = f"{self.endpoint}/{self.bucket}/{key}"
+
+        # Collect content
+        data = b""
+        async for chunk in content:
+            data += chunk
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.put(
+                    url,
+                    data=data,
+                    timeout=aiohttp.ClientTimeout(total=300),
+                ) as resp:
+                    if resp.status >= 400:
+                        raise ValueError(f"S3 upload error: {resp.status}")
+        except aiohttp.ClientError as e:
+            raise ValueError(f"S3 upload failed: {str(e)}")
+
+        mime_type, _ = mimetypes.guess_type(filename)
+        return FileInfo(
+            name=filename,
+            path=f"/{key}",
+            file_type="file",
+            size=len(data),
+            mime_type=mime_type,
+        )
+
+    async def delete_files(self, paths: list[str]) -> int:
+        """Delete files from S3."""
+        deleted = 0
+
+        for path in paths:
+            if ".." in path:
+                continue
+            key = path.lstrip("/")
+            url = f"{self.endpoint}/{self.bucket}/{key}"
+
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.delete(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                        if resp.status < 400:
+                            deleted += 1
+            except aiohttp.ClientError:
+                pass
+
+        return deleted
+
+    async def create_folder(self, path: str) -> FileInfo:
+        """Create folder in S3 (creates empty object with trailing /)."""
+        if ".." in path:
+            raise ValueError("Path traversal not allowed")
+
+        key = path.lstrip("/").rstrip("/") + "/"
+        url = f"{self.endpoint}/{self.bucket}/{key}"
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.put(
+                    url,
+                    data=b"",
+                    timeout=aiohttp.ClientTimeout(total=30),
+                ) as resp:
+                    if resp.status >= 400:
+                        raise ValueError(f"S3 create folder error: {resp.status}")
+        except aiohttp.ClientError as e:
+            raise ValueError(f"S3 create folder failed: {str(e)}")
+
+        name = path.rstrip("/").split("/")[-1]
+        return FileInfo(
+            name=name,
+            path=path,
+            file_type="directory",
+            item_count=0,
+        )
+
+    async def move_file(self, source: str, destination: str) -> FileInfo:
+        """Move file in S3 (copy + delete)."""
+        if ".." in source or ".." in destination:
+            raise ValueError("Path traversal not allowed")
+
+        src_key = source.lstrip("/")
+        dst_key = destination.lstrip("/")
+
+        # Copy
+        copy_url = f"{self.endpoint}/{self.bucket}/{dst_key}"
+        copy_source = f"/{self.bucket}/{src_key}"
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                # Copy object
+                async with session.put(
+                    copy_url,
+                    headers={"x-amz-copy-source": copy_source},
+                    timeout=aiohttp.ClientTimeout(total=60),
+                ) as resp:
+                    if resp.status >= 400:
+                        raise ValueError(f"S3 copy error: {resp.status}")
+
+                # Delete source
+                delete_url = f"{self.endpoint}/{self.bucket}/{src_key}"
+                await session.delete(delete_url, timeout=aiohttp.ClientTimeout(total=30))
+        except aiohttp.ClientError as e:
+            raise ValueError(f"S3 move failed: {str(e)}")
+
+        name = destination.rstrip("/").split("/")[-1]
+        mime_type, _ = mimetypes.guess_type(name)
+        return FileInfo(
+            name=name,
+            path=destination,
+            file_type="file",
+            mime_type=mime_type,
+        )
 
 
 class IscsiBackendService:
