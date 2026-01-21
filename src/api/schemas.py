@@ -2,7 +2,7 @@
 import json
 import re
 from datetime import datetime
-from typing import Generic, TypeVar
+from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -482,3 +482,107 @@ class FileDelete(BaseModel):
             if ".." in path:
                 raise ValueError("Path traversal not allowed")
         return v
+
+
+# ============== iSCSI LUN Schemas ==============
+
+
+class IscsiLunCreate(BaseModel):
+    """Schema for creating an iSCSI LUN."""
+
+    name: str
+    size_gb: int
+    backend_id: str
+    purpose: Literal["boot_from_san", "install_source", "auto_provision"]
+    chap_enabled: bool = False
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not v or len(v) < 2:
+            raise ValueError("Name must be at least 2 characters")
+        if not all(c.isalnum() or c == "-" for c in v):
+            raise ValueError("Name must contain only alphanumeric characters and hyphens")
+        if v.startswith("-") or v.endswith("-"):
+            raise ValueError("Name cannot start or end with a hyphen")
+        return v.lower()
+
+    @field_validator("size_gb")
+    @classmethod
+    def validate_size(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("Size must be at least 1 GB")
+        if v > 10000:
+            raise ValueError("Size cannot exceed 10000 GB")
+        return v
+
+
+class IscsiLunUpdate(BaseModel):
+    """Schema for updating an iSCSI LUN."""
+
+    name: str | None = None
+    chap_enabled: bool | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if len(v) < 2:
+            raise ValueError("Name must be at least 2 characters")
+        if not all(c.isalnum() or c == "-" for c in v):
+            raise ValueError("Name must contain only alphanumeric characters and hyphens")
+        if v.startswith("-") or v.endswith("-"):
+            raise ValueError("Name cannot start or end with a hyphen")
+        return v.lower()
+
+
+class IscsiLunResponse(BaseModel):
+    """Response schema for iSCSI LUN."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    size_gb: int
+    backend_id: str
+    backend_name: str
+    iqn: str
+    lun_number: int
+    purpose: str
+    status: str
+    error_message: str | None
+    assigned_node_id: str | None
+    assigned_node_name: str | None
+    chap_enabled: bool
+    chap_username: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_lun(cls, lun) -> "IscsiLunResponse":
+        """Create response from IscsiLun model."""
+        return cls(
+            id=lun.id,
+            name=lun.name,
+            size_gb=lun.size_gb,
+            backend_id=lun.backend_id,
+            backend_name=lun.backend.name if lun.backend else "Unknown",
+            iqn=lun.iqn,
+            lun_number=lun.lun_number,
+            purpose=lun.purpose,
+            status=lun.status,
+            error_message=lun.error_message,
+            assigned_node_id=lun.assigned_node_id,
+            assigned_node_name=lun.assigned_node.hostname if lun.assigned_node else None,
+            chap_enabled=lun.chap_enabled,
+            chap_username=lun.chap_username,
+            created_at=lun.created_at,
+            updated_at=lun.updated_at,
+        )
+
+
+class LunAssign(BaseModel):
+    """Schema for assigning a LUN to a node."""
+
+    node_id: str

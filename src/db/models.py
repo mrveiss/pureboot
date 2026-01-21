@@ -125,3 +125,51 @@ class StorageBackend(Base):
     updated_at: Mapped[datetime] = mapped_column(
         default=func.now(), onupdate=func.now()
     )
+
+
+class IscsiLun(Base):
+    """iSCSI LUN for boot-from-SAN and storage provisioning."""
+
+    __tablename__ = "iscsi_luns"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    size_gb: Mapped[int] = mapped_column(nullable=False)
+
+    # Reference to iSCSI storage backend
+    backend_id: Mapped[str] = mapped_column(
+        ForeignKey("storage_backends.id"), nullable=False
+    )
+    backend: Mapped[StorageBackend] = relationship()
+
+    # iSCSI identifiers
+    iqn: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    lun_number: Mapped[int] = mapped_column(default=0)
+
+    # Purpose and status
+    purpose: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # boot_from_san, install_source, auto_provision
+    status: Mapped[str] = mapped_column(
+        String(20), default="creating", index=True
+    )  # creating, ready, active, error, deleting
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Node assignment
+    assigned_node_id: Mapped[str | None] = mapped_column(
+        ForeignKey("nodes.id"), nullable=True
+    )
+    assigned_node: Mapped["Node | None"] = relationship()
+
+    # CHAP authentication (password encrypted)
+    chap_enabled: Mapped[bool] = mapped_column(default=False)
+    chap_username: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    chap_password_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        default=func.now(), onupdate=func.now()
+    )
