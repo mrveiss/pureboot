@@ -173,3 +173,88 @@ class IscsiLun(Base):
     updated_at: Mapped[datetime] = mapped_column(
         default=func.now(), onupdate=func.now()
     )
+
+
+class SyncJob(Base):
+    """Sync job for automated file synchronization from external sources."""
+
+    __tablename__ = "sync_jobs"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    source_url: Mapped[str] = mapped_column(String(2000), nullable=False)
+
+    # Destination
+    destination_backend_id: Mapped[str] = mapped_column(
+        ForeignKey("storage_backends.id"), nullable=False
+    )
+    destination_backend: Mapped[StorageBackend] = relationship()
+    destination_path: Mapped[str] = mapped_column(String(500), nullable=False)
+
+    # Filtering
+    include_pattern: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    exclude_pattern: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    # Schedule
+    schedule: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # manual, hourly, daily, weekly, monthly
+    schedule_day: Mapped[int | None] = mapped_column(nullable=True)  # 0-6 or 1-31
+    schedule_time: Mapped[str | None] = mapped_column(String(5), nullable=True)  # HH:MM
+
+    # Sync options
+    verify_checksums: Mapped[bool] = mapped_column(default=True)
+    delete_removed: Mapped[bool] = mapped_column(default=False)
+    keep_versions: Mapped[int] = mapped_column(default=3)
+
+    # Status
+    status: Mapped[str] = mapped_column(
+        String(20), default="idle", index=True
+    )  # idle, running, synced, failed
+    last_run_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        default=func.now(), onupdate=func.now()
+    )
+
+    # Relationships
+    runs: Mapped[list["SyncJobRun"]] = relationship(
+        back_populates="job", cascade="all, delete-orphan"
+    )
+
+
+class SyncJobRun(Base):
+    """Individual run record for a sync job."""
+
+    __tablename__ = "sync_job_runs"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    job_id: Mapped[str] = mapped_column(
+        ForeignKey("sync_jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    started_at: Mapped[datetime] = mapped_column(default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), default="running"
+    )  # running, success, failed
+
+    # Stats
+    files_synced: Mapped[int] = mapped_column(default=0)
+    bytes_transferred: Mapped[int] = mapped_column(default=0)
+
+    # Progress
+    current_file: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    progress_percent: Mapped[int] = mapped_column(default=0)
+
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Relationships
+    job: Mapped[SyncJob] = relationship(back_populates="runs")
