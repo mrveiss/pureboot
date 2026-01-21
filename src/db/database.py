@@ -20,6 +20,14 @@ async_session = async_sessionmaker(
     expire_on_commit=False,
 )
 
+# Alias for scheduler use
+async_session_factory = async_session
+
+
+def get_database_url() -> str:
+    """Get the database URL for async connections."""
+    return settings.database.url
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency for getting database sessions."""

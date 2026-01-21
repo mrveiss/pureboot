@@ -9,10 +9,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from src.api.routes import boot, ipxe, nodes, groups, storage, files, luns, system
-from src.db.database import init_db, close_db
+from src.api.routes.sync_jobs import router as sync_jobs_router
+from src.db.database import init_db, close_db, async_session_factory
 from src.config import settings
 from src.pxe.tftp_server import TFTPServer
 from src.pxe.dhcp_proxy import DHCPProxy
+from src.core.scheduler import sync_scheduler
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -75,12 +77,21 @@ async def lifespan(app: FastAPI):
             )
             dhcp_proxy = None
 
+    # Start scheduler and re-register scheduled jobs
+    sync_scheduler.start()
+    await _register_scheduled_jobs()
+    logger.info("Scheduler started")
+
     logger.info(f"PureBoot ready on http://{settings.host}:{settings.port}")
 
     yield
 
     # Cleanup
     logger.info("Shutting down PureBoot...")
+
+    # Stop scheduler
+    sync_scheduler.shutdown(wait=True)
+    logger.info("Scheduler stopped")
 
     if tftp_server:
         await tftp_server.stop()
@@ -90,6 +101,34 @@ async def lifespan(app: FastAPI):
 
     await close_db()
     logger.info("Database connections closed")
+
+
+async def _register_scheduled_jobs():
+    """Re-register all non-manual sync jobs on startup."""
+    from src.db.models import SyncJob
+    from sqlalchemy import select
+
+    if not async_session_factory:
+        return
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(SyncJob).where(SyncJob.schedule != "manual")
+        )
+        jobs = result.scalars().all()
+
+        for job in jobs:
+            next_run = sync_scheduler.schedule_job(
+                job.id,
+                job.schedule,
+                job.schedule_day,
+                job.schedule_time,
+            )
+            if next_run:
+                job.next_run_at = next_run
+
+        await db.commit()
+        logger.info(f"Re-registered {len(jobs)} scheduled sync jobs")
 
 
 app = FastAPI(
@@ -108,6 +147,7 @@ app.include_router(storage.router, prefix="/api/v1", tags=["storage"])
 app.include_router(files.router, prefix="/api/v1", tags=["files"])
 app.include_router(luns.router, prefix="/api/v1", tags=["luns"])
 app.include_router(system.router, prefix="/api/v1", tags=["system"])
+app.include_router(sync_jobs_router, prefix="/api/v1", tags=["sync-jobs"])
 
 # Static assets directory
 assets_dir = Path("assets")

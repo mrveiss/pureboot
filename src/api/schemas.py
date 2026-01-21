@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from typing import Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 T = TypeVar("T")
 
@@ -586,3 +586,166 @@ class LunAssign(BaseModel):
     """Schema for assigning a LUN to a node."""
 
     node_id: str
+
+
+# ============== Sync Job Schemas ==============
+
+
+class SyncJobCreate(BaseModel):
+    """Schema for creating a sync job."""
+
+    name: str = Field(
+        ...,
+        min_length=3,
+        max_length=100,
+        pattern=r"^[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$",
+    )
+    source_url: HttpUrl
+    destination_backend_id: str
+    destination_path: str = Field(..., max_length=500)
+    include_pattern: str | None = Field(None, max_length=500)
+    exclude_pattern: str | None = Field(None, max_length=500)
+    schedule: Literal["manual", "hourly", "daily", "weekly", "monthly"]
+    schedule_day: int | None = None
+    schedule_time: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    verify_checksums: bool = True
+    delete_removed: bool = False
+    keep_versions: int = Field(3, ge=0, le=10)
+
+    @field_validator("destination_path")
+    @classmethod
+    def validate_destination_path(cls, v: str) -> str:
+        if ".." in v:
+            raise ValueError("Path cannot contain '..'")
+        return v.strip("/")
+
+    @field_validator("schedule_day")
+    @classmethod
+    def validate_schedule_day(cls, v: int | None, info) -> int | None:
+        schedule = info.data.get("schedule")
+        if schedule == "weekly" and v is not None and not (0 <= v <= 6):
+            raise ValueError("Weekly schedule_day must be 0-6 (Mon-Sun)")
+        if schedule == "monthly" and v is not None and not (1 <= v <= 31):
+            raise ValueError("Monthly schedule_day must be 1-31")
+        return v
+
+    @model_validator(mode="after")
+    def validate_schedule_requirements(self) -> "SyncJobCreate":
+        if self.schedule in ("daily", "weekly", "monthly") and not self.schedule_time:
+            raise ValueError(f"{self.schedule} schedule requires schedule_time")
+        if self.schedule == "weekly" and self.schedule_day is None:
+            raise ValueError("Weekly schedule requires schedule_day (0-6)")
+        if self.schedule == "monthly" and self.schedule_day is None:
+            raise ValueError("Monthly schedule requires schedule_day (1-31)")
+        return self
+
+
+class SyncJobUpdate(BaseModel):
+    """Schema for updating a sync job."""
+
+    name: str | None = Field(
+        None,
+        min_length=3,
+        max_length=100,
+        pattern=r"^[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$",
+    )
+    source_url: HttpUrl | None = None
+    destination_path: str | None = Field(None, max_length=500)
+    include_pattern: str | None = None
+    exclude_pattern: str | None = None
+    schedule: Literal["manual", "hourly", "daily", "weekly", "monthly"] | None = None
+    schedule_day: int | None = None
+    schedule_time: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    verify_checksums: bool | None = None
+    delete_removed: bool | None = None
+    keep_versions: int | None = Field(None, ge=0, le=10)
+
+    @field_validator("destination_path")
+    @classmethod
+    def validate_destination_path(cls, v: str | None) -> str | None:
+        if v and ".." in v:
+            raise ValueError("Path cannot contain '..'")
+        return v.strip("/") if v else v
+
+
+class SyncJobResponse(BaseModel):
+    """Response schema for sync job."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    source_url: str
+    destination_backend_id: str
+    destination_backend_name: str
+    destination_path: str
+    include_pattern: str | None
+    exclude_pattern: str | None
+    schedule: str
+    schedule_day: int | None
+    schedule_time: str | None
+    verify_checksums: bool
+    delete_removed: bool
+    keep_versions: int
+    status: str
+    last_run_at: datetime | None
+    last_error: str | None
+    next_run_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_job(cls, job) -> "SyncJobResponse":
+        """Create response from SyncJob model."""
+        return cls(
+            id=job.id,
+            name=job.name,
+            source_url=job.source_url,
+            destination_backend_id=job.destination_backend_id,
+            destination_backend_name=job.destination_backend.name if job.destination_backend else "Unknown",
+            destination_path=job.destination_path,
+            include_pattern=job.include_pattern,
+            exclude_pattern=job.exclude_pattern,
+            schedule=job.schedule,
+            schedule_day=job.schedule_day,
+            schedule_time=job.schedule_time,
+            verify_checksums=job.verify_checksums,
+            delete_removed=job.delete_removed,
+            keep_versions=job.keep_versions,
+            status=job.status,
+            last_run_at=job.last_run_at,
+            last_error=job.last_error,
+            next_run_at=job.next_run_at,
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+        )
+
+
+class SyncJobRunResponse(BaseModel):
+    """Response schema for sync job run."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    job_id: str
+    started_at: datetime
+    completed_at: datetime | None
+    status: str
+    files_synced: int
+    bytes_transferred: int
+    current_file: str | None
+    progress_percent: int
+    error: str | None
+
+
+class SyncProgress(BaseModel):
+    """WebSocket message format for sync progress."""
+
+    job_id: str
+    run_id: str
+    status: str
+    current_file: str | None
+    files_synced: int
+    bytes_transferred: int
+    progress_percent: int
+    error: str | None
