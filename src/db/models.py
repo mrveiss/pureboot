@@ -77,6 +77,41 @@ class Node(Base):
     )
     last_seen_at: Mapped[datetime | None] = mapped_column()
 
+    # Installation tracking
+    install_attempts: Mapped[int] = mapped_column(default=0)
+    last_install_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    state_changed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    # State log relationship
+    state_logs: Mapped[list["NodeStateLog"]] = relationship(
+        back_populates="node", cascade="all, delete-orphan"
+    )
+
+
+class NodeStateLog(Base):
+    """Audit log for node state transitions."""
+
+    __tablename__ = "node_state_logs"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    from_state: Mapped[str] = mapped_column(String(20), nullable=False)
+    to_state: Mapped[str] = mapped_column(String(20), nullable=False)
+    triggered_by: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # admin, system, node_report
+    user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    # Relationship
+    node: Mapped["Node"] = relationship(back_populates="state_logs")
+
 
 class NodeTag(Base):
     """Tag for categorizing nodes."""
