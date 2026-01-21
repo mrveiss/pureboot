@@ -2,7 +2,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -10,15 +10,18 @@ from src.api.schemas import (
     ApiListResponse,
     ApiResponse,
     NodeCreate,
+    NodeHistoryResponse,
     NodeReport,
     NodeResponse,
+    NodeStateLogResponse,
     NodeUpdate,
     StateTransition,
     TagCreate,
 )
 from src.core.state_machine import InvalidStateTransition, NodeStateMachine
+from src.core.state_service import StateTransitionService
 from src.db.database import get_db
-from src.db.models import Node, NodeTag
+from src.db.models import Node, NodeStateLog, NodeTag
 
 router = APIRouter()
 
@@ -146,14 +149,20 @@ async def transition_node_state(
         raise HTTPException(status_code=404, detail="Node not found")
 
     try:
-        new_state = NodeStateMachine.transition(node.state, transition.state)
-        node.state = new_state
+        await StateTransitionService.transition(
+            db=db,
+            node=node,
+            to_state=transition.state,
+            triggered_by="admin",
+            comment=transition.comment,
+            force=transition.force,
+        )
         await db.flush()
         await db.refresh(node, ["tags"])
 
         return ApiResponse(
             data=NodeResponse.from_node(node),
-            message=f"Node transitioned to {new_state}",
+            message=f"Node transitioned to {transition.state}",
         )
     except InvalidStateTransition as e:
         valid = NodeStateMachine.get_valid_transitions(node.state)
@@ -161,6 +170,43 @@ async def transition_node_state(
             status_code=400,
             detail=f"{str(e)}. Valid transitions: {valid}",
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/nodes/{node_id}/history", response_model=NodeHistoryResponse)
+async def get_node_history(
+    node_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get node state transition history."""
+    # Verify node exists
+    node_result = await db.execute(select(Node).where(Node.id == node_id))
+    if not node_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    # Get total count
+    count_result = await db.execute(
+        select(func.count()).select_from(NodeStateLog).where(NodeStateLog.node_id == node_id)
+    )
+    total = count_result.scalar() or 0
+
+    # Get logs with pagination
+    logs_result = await db.execute(
+        select(NodeStateLog)
+        .where(NodeStateLog.node_id == node_id)
+        .order_by(NodeStateLog.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    logs = logs_result.scalars().all()
+
+    return NodeHistoryResponse(
+        data=[NodeStateLogResponse.from_log(log) for log in logs],
+        total=total,
+    )
 
 
 @router.delete("/nodes/{node_id}", response_model=ApiResponse[NodeResponse])
@@ -178,7 +224,12 @@ async def retire_node(
         raise HTTPException(status_code=404, detail="Node not found")
 
     try:
-        node.state = NodeStateMachine.transition(node.state, "retired")
+        await StateTransitionService.transition(
+            db=db,
+            node=node,
+            to_state="retired",
+            triggered_by="admin",
+        )
         await db.flush()
         await db.refresh(node, ["tags"])
 
