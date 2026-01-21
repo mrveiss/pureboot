@@ -1,44 +1,19 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { AppShell } from '@/components/layout'
-import { Dashboard, Login, Nodes, NodeDetail, Groups, GroupDetail, Storage, NotFound } from '@/pages'
-import { useAuthStore } from '@/stores'
+import { Dashboard, Nodes, NodeDetail, Groups, GroupDetail, Storage, NotFound } from '@/pages'
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuthStore()
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />
-  }
-
-  return <>{children}</>
-}
-
-function PublicRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuthStore()
-
-  if (isAuthenticated) {
-    return <Navigate to="/" replace />
-  }
-
-  return <>{children}</>
-}
+// Authentication is not yet implemented on the backend
+// All routes are currently open access (secure with firewall)
+// TODO: Re-enable ProtectedRoute when backend auth is implemented
 
 export const router = createBrowserRouter([
   {
     path: '/login',
-    element: (
-      <PublicRoute>
-        <Login />
-      </PublicRoute>
-    ),
+    element: <Navigate to="/" replace />,
   },
   {
     path: '/',
-    element: (
-      <ProtectedRoute>
-        <AppShell />
-      </ProtectedRoute>
-    ),
+    element: <AppShell />,
     children: [
       { index: true, element: <Dashboard /> },
       { path: 'nodes', element: <Nodes /> },
