@@ -1,8 +1,8 @@
 """Node management API endpoints."""
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -10,15 +10,18 @@ from src.api.schemas import (
     ApiListResponse,
     ApiResponse,
     NodeCreate,
+    NodeHistoryResponse,
     NodeReport,
     NodeResponse,
+    NodeStateLogResponse,
     NodeUpdate,
     StateTransition,
     TagCreate,
 )
 from src.core.state_machine import InvalidStateTransition, NodeStateMachine
+from src.core.state_service import StateTransitionService
 from src.db.database import get_db
-from src.db.models import Node, NodeTag
+from src.db.models import Node, NodeStateLog, NodeTag
 
 router = APIRouter()
 
@@ -146,14 +149,20 @@ async def transition_node_state(
         raise HTTPException(status_code=404, detail="Node not found")
 
     try:
-        new_state = NodeStateMachine.transition(node.state, transition.state)
-        node.state = new_state
+        await StateTransitionService.transition(
+            db=db,
+            node=node,
+            to_state=transition.state,
+            triggered_by="admin",
+            comment=transition.comment,
+            force=transition.force,
+        )
         await db.flush()
         await db.refresh(node, ["tags"])
 
         return ApiResponse(
             data=NodeResponse.from_node(node),
-            message=f"Node transitioned to {new_state}",
+            message=f"Node transitioned to {transition.state}",
         )
     except InvalidStateTransition as e:
         valid = NodeStateMachine.get_valid_transitions(node.state)
@@ -161,6 +170,43 @@ async def transition_node_state(
             status_code=400,
             detail=f"{str(e)}. Valid transitions: {valid}",
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/nodes/{node_id}/history", response_model=NodeHistoryResponse)
+async def get_node_history(
+    node_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get node state transition history."""
+    # Verify node exists
+    node_result = await db.execute(select(Node).where(Node.id == node_id))
+    if not node_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    # Get total count
+    count_result = await db.execute(
+        select(func.count()).select_from(NodeStateLog).where(NodeStateLog.node_id == node_id)
+    )
+    total = count_result.scalar() or 0
+
+    # Get logs with pagination
+    logs_result = await db.execute(
+        select(NodeStateLog)
+        .where(NodeStateLog.node_id == node_id)
+        .order_by(NodeStateLog.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    logs = logs_result.scalars().all()
+
+    return NodeHistoryResponse(
+        data=[NodeStateLogResponse.from_log(log) for log in logs],
+        total=total,
+    )
 
 
 @router.delete("/nodes/{node_id}", response_model=ApiResponse[NodeResponse])
@@ -178,7 +224,12 @@ async def retire_node(
         raise HTTPException(status_code=404, detail="Node not found")
 
     try:
-        node.state = NodeStateMachine.transition(node.state, "retired")
+        await StateTransitionService.transition(
+            db=db,
+            node=node,
+            to_state="retired",
+            triggered_by="admin",
+        )
         await db.flush()
         await db.refresh(node, ["tags"])
 
@@ -268,8 +319,8 @@ async def report_node_status(
 ):
     """Report node status and update information.
 
-    Called by nodes to report their current status and update
-    hardware information after OS boot.
+    Called by nodes to report their current status, update
+    hardware information, and report installation progress.
     """
     # Look up node by MAC
     result = await db.execute(
@@ -286,7 +337,7 @@ async def report_node_status(
         )
 
     # Update node information
-    node.last_seen_at = datetime.utcnow()
+    node.last_seen_at = datetime.now(timezone.utc)
 
     if report.ip_address:
         node.ip_address = report.ip_address
@@ -301,10 +352,58 @@ async def report_node_status(
     if report.system_uuid:
         node.system_uuid = report.system_uuid
 
+    # Handle installation status reporting
+    message = "Status reported successfully"
+
+    if report.installation_status:
+        try:
+            if report.installation_status == "started" and node.state == "pending":
+                # Node started installing
+                await StateTransitionService.transition(
+                    db=db,
+                    node=node,
+                    to_state="installing",
+                    triggered_by="node_report",
+                )
+                node.install_attempts = 0
+                message = "Installation started"
+
+            elif report.installation_status == "complete" and node.state == "installing":
+                # Installation succeeded
+                await StateTransitionService.transition(
+                    db=db,
+                    node=node,
+                    to_state="installed",
+                    triggered_by="node_report",
+                )
+                message = "Installation completed"
+
+            elif report.installation_status == "failed" and node.state == "installing":
+                # Installation failed
+                await StateTransitionService.handle_install_failure(
+                    db=db,
+                    node=node,
+                    error=report.installation_error,
+                )
+                if node.state == "install_failed":
+                    message = f"Installation failed after {node.install_attempts} attempts"
+                else:
+                    message = f"Installation failed (attempt {node.install_attempts}), will retry"
+
+            elif report.installation_status == "progress":
+                # Progress update - no state change
+                pass
+
+        except InvalidStateTransition as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot process installation status: {str(e)}",
+            )
+
     await db.flush()
     await db.refresh(node, ["tags"])
 
     return ApiResponse(
         data=NodeResponse.from_node(node),
-        message="Status reported successfully",
+        message=message,
     )

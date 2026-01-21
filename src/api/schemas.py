@@ -2,9 +2,12 @@
 import json
 import re
 from datetime import datetime
-from typing import Generic, Literal, TypeVar
+from typing import TYPE_CHECKING, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
+
+if TYPE_CHECKING:
+    from src.db.models import NodeStateLog
 
 T = TypeVar("T")
 
@@ -72,9 +75,11 @@ class NodeUpdate(BaseModel):
 
 
 class StateTransition(BaseModel):
-    """Schema for state transition request."""
+    """Request to transition node to new state."""
 
     state: str
+    comment: str | None = None
+    force: bool = False  # Bypasses retry limit, resets counters
 
     @field_validator("state")
     @classmethod
@@ -124,6 +129,9 @@ class NodeResponse(BaseModel):
     boot_mode: str
     group_id: str | None
     tags: list[str] = []
+    install_attempts: int = 0
+    last_install_error: str | None = None
+    state_changed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     last_seen_at: datetime | None
@@ -146,10 +154,53 @@ class NodeResponse(BaseModel):
             boot_mode=node.boot_mode,
             group_id=node.group_id,
             tags=[t.tag for t in node.tags],
+            install_attempts=node.install_attempts,
+            last_install_error=node.last_install_error,
+            state_changed_at=node.state_changed_at,
             created_at=node.created_at,
             updated_at=node.updated_at,
             last_seen_at=node.last_seen_at,
         )
+
+
+class NodeStateLogResponse(BaseModel):
+    """Response schema for node state log entry."""
+
+    id: str
+    from_state: str
+    to_state: str
+    triggered_by: str
+    user_id: str | None
+    comment: str | None
+    metadata: dict | None
+    created_at: datetime
+
+    @classmethod
+    def from_log(cls, log: "NodeStateLog") -> "NodeStateLogResponse":
+        metadata = None
+        if log.metadata_json:
+            try:
+                metadata = json.loads(log.metadata_json)
+            except json.JSONDecodeError:
+                metadata = None
+
+        return cls(
+            id=log.id,
+            from_state=log.from_state,
+            to_state=log.to_state,
+            triggered_by=log.triggered_by,
+            user_id=log.user_id,
+            comment=log.comment,
+            metadata=metadata,
+            created_at=log.created_at,
+        )
+
+
+class NodeHistoryResponse(BaseModel):
+    """Response for node state history."""
+
+    data: list[NodeStateLogResponse]
+    total: int
 
 
 # ============== Device Group Schemas ==============
@@ -214,7 +265,7 @@ class DeviceGroupResponse(BaseModel):
 
 
 class NodeReport(BaseModel):
-    """Schema for node status report."""
+    """Node status report from the node itself."""
 
     mac_address: str
     ip_address: str | None = None
@@ -223,7 +274,11 @@ class NodeReport(BaseModel):
     model: str | None = None
     serial_number: str | None = None
     system_uuid: str | None = None
-    state_info: dict | None = None  # Installation progress, etc.
+
+    # Installation reporting
+    installation_status: Literal["started", "progress", "complete", "failed"] | None = None
+    installation_progress: int | None = None  # 0-100
+    installation_error: str | None = None
 
     @field_validator("mac_address")
     @classmethod
@@ -232,6 +287,13 @@ class NodeReport(BaseModel):
         if not MAC_PATTERN.match(v):
             raise ValueError(f"Invalid MAC address format: {v}")
         return normalize_mac(v)
+
+    @field_validator("installation_progress")
+    @classmethod
+    def validate_progress(cls, v: int | None) -> int | None:
+        if v is not None and not (0 <= v <= 100):
+            raise ValueError("Progress must be between 0 and 100")
+        return v
 
 
 # ============== Generic Response Schemas ==============
