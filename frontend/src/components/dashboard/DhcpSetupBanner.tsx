@@ -70,26 +70,53 @@ export function DhcpSetupBanner({ onDismiss }: DhcpSetupBannerProps) {
     return null
   }
 
-  // Full ISC DHCP config with architecture detection
-  const iscDhcpConfig = `# PureBoot PXE Configuration
-# Add to your dhcpd.conf
+  // Full ISC DHCP config with architecture detection (recommended for mixed environments)
+  const iscDhcpConfig = `# PureBoot PXE Configuration (Mixed BIOS + UEFI)
+# Add to your dhcpd.conf - RECOMMENDED for homelabs with mixed hardware
 
 # Define architecture option (required for BIOS/UEFI detection)
 option arch code 93 = unsigned integer 16;
 
-# PXE boot settings
+# PXE boot settings - point to PureBoot server
 next-server ${server_ip};
 
-# Serve different bootloaders based on client architecture
+# Dynamically serve correct bootloader based on client architecture
+# Client sends Option 93 indicating what it supports
 if option arch = 00:00 {
     filename "${required_settings.filename_bios}";      # BIOS x86
+} elsif option arch = 00:06 {
+    filename "${required_settings.filename_uefi}";      # UEFI x86 (32-bit)
 } elsif option arch = 00:07 {
-    filename "${required_settings.filename_uefi}";      # UEFI x64
+    filename "${required_settings.filename_uefi}";      # UEFI x64 (most common)
 } elsif option arch = 00:09 {
-    filename "${required_settings.filename_uefi}";      # UEFI x64 (EBC)
+    filename "${required_settings.filename_uefi}";      # UEFI x64 EBC
+} elsif option arch = 00:0b {
+    filename "uefi/arm64.efi";                          # ARM64 UEFI
 } else {
     filename "${required_settings.filename_bios}";      # Fallback to BIOS
 }`
+
+  // dnsmasq config (common for home routers, Pi-hole)
+  const dnsmasqConfig = `# PureBoot PXE Configuration for dnsmasq
+# Add to /etc/dnsmasq.conf or /etc/dnsmasq.d/pxe.conf
+
+# Enable TFTP and set root
+enable-tftp
+tftp-root=/var/lib/tftpboot
+
+# Tag clients by architecture (Option 93)
+dhcp-match=set:bios,option:client-arch,0
+dhcp-match=set:efi32,option:client-arch,6
+dhcp-match=set:efi64,option:client-arch,7
+dhcp-match=set:efi64,option:client-arch,9
+
+# Serve appropriate bootloader
+dhcp-boot=tag:bios,${required_settings.filename_bios},pureboot,${server_ip}
+dhcp-boot=tag:efi32,${required_settings.filename_uefi},pureboot,${server_ip}
+dhcp-boot=tag:efi64,${required_settings.filename_uefi},pureboot,${server_ip}
+
+# Default fallback
+dhcp-boot=${required_settings.filename_bios},pureboot,${server_ip}`
 
   // Simple config (BIOS only)
   const simpleBiosConfig = `next-server ${server_ip};
@@ -163,69 +190,134 @@ filename "${required_settings.filename_uefi}";`
                   </div>
                 </div>
 
-                {/* Quick Copy Buttons */}
-                <div className="mt-4 flex flex-wrap gap-2">
+                {/* Copy Config Buttons - Recommended first */}
+                <div className="mt-4 space-y-3">
+                  {/* Recommended: Dynamic/Mixed */}
+                  <div className="rounded-md border border-green-300 bg-green-50 p-3 dark:border-green-700 dark:bg-green-900/30">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-green-800 dark:text-green-200">
+                        Recommended: Dynamic Config (Mixed BIOS + UEFI)
+                      </span>
+                      <span className="text-xs bg-green-200 text-green-800 px-2 py-0.5 rounded dark:bg-green-800 dark:text-green-200">
+                        Homelab
+                      </span>
+                    </div>
+                    <p className="text-xs text-green-700 dark:text-green-300 mb-2">
+                      Automatically detects client architecture and serves the correct bootloader.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-green-400 text-green-700 hover:bg-green-100 dark:border-green-600 dark:text-green-300 dark:hover:bg-green-900"
+                        onClick={() => copyToClipboard(iscDhcpConfig, 'isc')}
+                      >
+                        {copied === 'isc' ? (
+                          <><Check className="mr-1.5 h-4 w-4" />Copied!</>
+                        ) : (
+                          <><Copy className="mr-1.5 h-4 w-4" />ISC DHCP (dhcpd)</>
+                        )}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-green-400 text-green-700 hover:bg-green-100 dark:border-green-600 dark:text-green-300 dark:hover:bg-green-900"
+                        onClick={() => copyToClipboard(dnsmasqConfig, 'dnsmasq')}
+                      >
+                        {copied === 'dnsmasq' ? (
+                          <><Check className="mr-1.5 h-4 w-4" />Copied!</>
+                        ) : (
+                          <><Copy className="mr-1.5 h-4 w-4" />dnsmasq (Pi-hole)</>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Simple configs for single-arch environments */}
+                  <div className="flex flex-wrap gap-2">
+                    <span className="text-xs text-blue-600 dark:text-blue-400 w-full mb-1">
+                      Or for single-architecture environments:
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-blue-300 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900"
+                      onClick={() => copyToClipboard(simpleBiosConfig, 'bios')}
+                    >
+                      {copied === 'bios' ? (
+                        <><Check className="mr-1.5 h-4 w-4" />Copied!</>
+                      ) : (
+                        <><Copy className="mr-1.5 h-4 w-4" />BIOS Only</>
+                      )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-blue-300 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900"
+                      onClick={() => copyToClipboard(simpleUefiConfig, 'uefi')}
+                    >
+                      {copied === 'uefi' ? (
+                        <><Check className="mr-1.5 h-4 w-4" />Copied!</>
+                      ) : (
+                        <><Copy className="mr-1.5 h-4 w-4" />UEFI Only</>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Expandable full configs */}
+                <div className="mt-3">
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="sm"
-                    className="border-blue-300 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900"
-                    onClick={() => copyToClipboard(simpleBiosConfig, 'bios')}
-                  >
-                    {copied === 'bios' ? (
-                      <><Check className="mr-1.5 h-4 w-4" />Copied!</>
-                    ) : (
-                      <><Copy className="mr-1.5 h-4 w-4" />BIOS Only</>
-                    )}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="border-blue-300 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900"
-                    onClick={() => copyToClipboard(simpleUefiConfig, 'uefi')}
-                  >
-                    {copied === 'uefi' ? (
-                      <><Check className="mr-1.5 h-4 w-4" />Copied!</>
-                    ) : (
-                      <><Copy className="mr-1.5 h-4 w-4" />UEFI Only</>
-                    )}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="border-blue-300 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900"
+                    className="text-blue-700 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900 w-full justify-start"
                     onClick={() => setShowAdvanced(!showAdvanced)}
                   >
                     {showAdvanced ? (
-                      <><ChevronUp className="mr-1.5 h-4 w-4" />Hide Full Config</>
+                      <><ChevronUp className="mr-1.5 h-4 w-4" />Hide full configuration examples</>
                     ) : (
-                      <><ChevronDown className="mr-1.5 h-4 w-4" />Full ISC DHCP Config</>
+                      <><ChevronDown className="mr-1.5 h-4 w-4" />Show full configuration examples</>
                     )}
                   </Button>
                 </div>
 
-                {/* Full Config (Expandable) */}
                 {showAdvanced && (
-                  <div className="mt-3">
-                    <div className="relative">
-                      <pre className="rounded-md bg-slate-900 p-3 text-xs text-slate-100 overflow-x-auto">
+                  <div className="mt-3 space-y-4">
+                    {/* ISC DHCP */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-medium text-blue-800 dark:text-blue-200">ISC DHCP Server (dhcpd.conf)</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-xs text-blue-500 hover:bg-blue-100 dark:hover:bg-blue-900"
+                          onClick={() => copyToClipboard(iscDhcpConfig, 'isc-full')}
+                        >
+                          {copied === 'isc-full' ? <><Check className="mr-1 h-3 w-3" />Copied</> : <><Copy className="mr-1 h-3 w-3" />Copy</>}
+                        </Button>
+                      </div>
+                      <pre className="rounded-md bg-slate-900 p-3 text-xs text-slate-100 overflow-x-auto max-h-48">
                         {iscDhcpConfig}
                       </pre>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="absolute top-2 right-2 h-7 text-slate-400 hover:text-white hover:bg-slate-700"
-                        onClick={() => copyToClipboard(iscDhcpConfig, 'full')}
-                      >
-                        {copied === 'full' ? (
-                          <><Check className="mr-1 h-3 w-3" />Copied</>
-                        ) : (
-                          <><Copy className="mr-1 h-3 w-3" />Copy</>
-                        )}
-                      </Button>
                     </div>
-                    <p className="mt-2 text-xs text-blue-600 dark:text-blue-400">
-                      This config automatically serves the correct bootloader based on client architecture.
-                    </p>
+
+                    {/* dnsmasq */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-medium text-blue-800 dark:text-blue-200">dnsmasq (Pi-hole, OpenWrt, etc.)</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-xs text-blue-500 hover:bg-blue-100 dark:hover:bg-blue-900"
+                          onClick={() => copyToClipboard(dnsmasqConfig, 'dnsmasq-full')}
+                        >
+                          {copied === 'dnsmasq-full' ? <><Check className="mr-1 h-3 w-3" />Copied</> : <><Copy className="mr-1 h-3 w-3" />Copy</>}
+                        </Button>
+                      </div>
+                      <pre className="rounded-md bg-slate-900 p-3 text-xs text-slate-100 overflow-x-auto max-h-48">
+                        {dnsmasqConfig}
+                      </pre>
+                    </div>
                   </div>
                 )}
 
