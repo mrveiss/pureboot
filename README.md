@@ -54,6 +54,24 @@ The installer will:
 - Build frontend
 - Configure systemd service
 
+### Quick Start
+
+After installation, start the service and access the web UI:
+
+```bash
+# Start the service
+sudo service pureboot start
+
+# Access Web UI
+http://<server-ip>:8080
+```
+
+**Default Settings:**
+- **Web UI Port:** 8080
+- **Authentication:** None (open access - secure with firewall)
+- **TFTP Port:** 69 (requires root/capabilities)
+- **Proxy DHCP Port:** 4011 (disabled by default)
+
 ### Service Management
 
 ```bash
