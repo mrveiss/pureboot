@@ -29,7 +29,7 @@ class BootMenuSettings(BaseSettings):
 
 class DatabaseSettings(BaseSettings):
     """Database settings."""
-    url: str = "sqlite+aiosqlite:///./pureboot.db"
+    url: str = "sqlite+aiosqlite:///./data/pureboot.db"
     echo: bool = False  # Log SQL statements
 
 
