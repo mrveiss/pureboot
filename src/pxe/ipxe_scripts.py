@@ -1,13 +1,19 @@
 """iPXE script generation."""
 from dataclasses import dataclass
 
+# ASCII art logo - styled version
 ASCII_LOGO = r"""
- ____                 ____              _
-|  _ \ _   _ _ __ ___| __ )  ___   ___ | |_
-| |_) | | | | '__/ _ \  _ \ / _ \ / _ \| __|
-|  __/| |_| | | |  __/ |_) | (_) | (_) | |_
-|_|    \__,_|_|  \___|____/ \___/ \___/ \__|
+    ____                  ____              __
+   / __ \__  __________  / __ )____  ____  / /_
+  / /_/ / / / / ___/ _ \/ __  / __ \/ __ \/ __/
+ / ____/ /_/ / /  /  __/ /_/ / /_/ / /_/ / /_
+/_/    \__,_/_/   \___/_____/\____/\____/\__/
 """
+
+# iPXE color codes (ANSI sequences)
+COLOR_CYAN = "${cls}color --rgb 0x00d4ff 0x000000"
+COLOR_WHITE = "color --rgb 0xffffff 0x000000"
+COLOR_RESET = "colour --basic 7"
 
 
 @dataclass
@@ -23,14 +29,33 @@ class IPXEScriptGenerator:
         """Generate the main boot script served by the API."""
         lines = ["#!ipxe", ""]
 
-        # Try PNG logo, fall back to ASCII
+        # Clear screen
+        lines.append("console --x 1024 --y 768 2>/dev/null || console --x 800 --y 600 2>/dev/null ||")
+        lines.append("cpair --foreground 7 --background 0 0")
+        lines.append("")
+
+        # Try PNG logo first
         if self.logo_url:
-            lines.append(f"console --picture http://{self.server_address}{self.logo_url} 2>/dev/null ||")
+            lines.append(f"console --picture http://{self.server_address}{self.logo_url} --keep 2>/dev/null ||")
             lines.append("")
 
-        # ASCII logo
+        # ASCII logo with cyan color
+        lines.append("cpair --foreground 6 --background 0 1")
+        lines.append("colour 1")
         for line in ASCII_LOGO.strip().split("\n"):
-            lines.append(f"echo {line}")
+            # Escape special characters for iPXE echo
+            escaped = line.replace("\\", "\\\\")
+            lines.append(f"echo {escaped}")
+
+        # Reset to white and show info
+        lines.append("cpair --foreground 7 --background 0 0")
+        lines.append("colour 0")
+        lines.append("echo")
+        lines.append("echo Network Boot Infrastructure")
+        lines.append("echo ============================")
+        lines.append("echo")
+        lines.append("echo MAC Address: ${mac}")
+        lines.append("echo IP Address:  ${ip}")
         lines.append("echo")
         lines.append("echo Contacting PureBoot server...")
         lines.append("echo")

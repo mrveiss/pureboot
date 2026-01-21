@@ -4,7 +4,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { systemApi, type DhcpStatusResponse } from '@/api'
 
-const DISMISSED_KEY = 'pureboot-dhcp-banner-dismissed'
+export const DHCP_BANNER_DISMISSED_KEY = 'pureboot-dhcp-banner-dismissed'
 
 interface DhcpSetupBannerProps {
   onDismiss?: () => void
@@ -17,7 +17,7 @@ export function DhcpSetupBanner({ onDismiss }: DhcpSetupBannerProps) {
   const [copied, setCopied] = useState<string | null>(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [dismissed, setDismissed] = useState(() => {
-    return localStorage.getItem(DISMISSED_KEY) === 'true'
+    return localStorage.getItem(DHCP_BANNER_DISMISSED_KEY) === 'true'
   })
 
   useEffect(() => {
@@ -37,7 +37,7 @@ export function DhcpSetupBanner({ onDismiss }: DhcpSetupBannerProps) {
   }
 
   function handleDismiss() {
-    localStorage.setItem(DISMISSED_KEY, 'true')
+    localStorage.setItem(DHCP_BANNER_DISMISSED_KEY, 'true')
     setDismissed(true)
     onDismiss?.()
   }

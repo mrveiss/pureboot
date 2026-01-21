@@ -185,16 +185,144 @@ create_directories() {
     mkdir -p "$INSTALL_DIR/data"
 }
 
+download_bootloaders() {
+    log_info "Downloading iPXE bootloaders..."
+
+    IPXE_BASE_URL="https://boot.ipxe.org"
+
+    # Download UEFI bootloader
+    if [ ! -f "$INSTALL_DIR/tftp/uefi/ipxe.efi" ]; then
+        log_info "Downloading ipxe.efi (UEFI x64)..."
+        if curl -fsSL "$IPXE_BASE_URL/ipxe.efi" -o "$INSTALL_DIR/tftp/uefi/ipxe.efi"; then
+            log_info "Downloaded ipxe.efi"
+        else
+            log_warn "Failed to download ipxe.efi - UEFI PXE boot will not work"
+        fi
+    else
+        log_info "ipxe.efi already exists"
+    fi
+
+    # Download BIOS bootloader
+    if [ ! -f "$INSTALL_DIR/tftp/bios/undionly.kpxe" ]; then
+        log_info "Downloading undionly.kpxe (BIOS)..."
+        if curl -fsSL "$IPXE_BASE_URL/undionly.kpxe" -o "$INSTALL_DIR/tftp/bios/undionly.kpxe"; then
+            log_info "Downloaded undionly.kpxe"
+        else
+            log_warn "Failed to download undionly.kpxe - BIOS PXE boot will not work"
+        fi
+    else
+        log_info "undionly.kpxe already exists"
+    fi
+
+    # Download UEFI 32-bit bootloader (for older UEFI systems)
+    if [ ! -f "$INSTALL_DIR/tftp/uefi/ipxe32.efi" ]; then
+        log_info "Downloading ipxe32.efi (UEFI x86)..."
+        if curl -fsSL "$IPXE_BASE_URL/ipxe32.efi" -o "$INSTALL_DIR/tftp/uefi/ipxe32.efi"; then
+            log_info "Downloaded ipxe32.efi"
+        else
+            log_warn "Failed to download ipxe32.efi - UEFI 32-bit PXE boot will not work"
+        fi
+    else
+        log_info "ipxe32.efi already exists"
+    fi
+
+    log_info "Bootloader download complete"
+}
+
+build_custom_bootloaders() {
+    # Only build if Docker is available
+    if ! command -v docker &> /dev/null; then
+        log_info "Docker not available - skipping custom bootloader build"
+        log_info "To build custom branded bootloaders later, run:"
+        log_info "  $INSTALL_DIR/scripts/build-ipxe.sh <server_ip>:8080"
+        return 0
+    fi
+
+    # Get server IP for embedded script
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+    SERVER_ADDR="${SERVER_IP}:8080"
+
+    log_info "Building custom PureBoot bootloaders for $SERVER_ADDR..."
+    log_info "This may take a few minutes on first run..."
+
+    # Build Docker image
+    log_info "Building iPXE builder Docker image..."
+    if ! docker build -t pureboot/ipxe-builder "$PROJECT_ROOT/docker/ipxe-builder"; then
+        log_warn "Failed to build Docker image - using stock bootloaders"
+        return 0
+    fi
+
+    # Create temp directory for build
+    BUILD_DIR=$(mktemp -d)
+    trap "rm -rf $BUILD_DIR" EXIT
+
+    # Generate embedded script with PureBoot branding
+    cat > "$BUILD_DIR/embed.ipxe" << SCRIPT
+#!ipxe
+# PureBoot Network Boot
+dhcp
+echo
+echo     ____                  ____              __
+echo    / __ \\\\__  __________  / __ )____  ____  / /_
+echo   / /_/ / / / / ___/ _ \\\\/ __  / __ \\\\/ __ \\\\/ __/
+echo  / ____/ /_/ / /  /  __/ /_/ / /_/ / /_/ / /_
+echo /_/    \\\\__,_/_/   \\\\___/_____/\\\\____/\\\\____/\\\\__/
+echo
+echo Network Boot Infrastructure
+echo
+echo MAC: \${mac}  IP: \${ip}
+echo
+chain http://$SERVER_ADDR/api/v1/ipxe/boot.ipxe || shell
+SCRIPT
+
+    # Build UEFI bootloader
+    log_info "Building UEFI bootloader (ipxe.efi)..."
+    docker run --rm \
+        -v "$BUILD_DIR:/build" \
+        -v "$INSTALL_DIR/tftp/uefi:/out" \
+        pureboot/ipxe-builder \
+        "make EMBED=/build/embed.ipxe bin-x86_64-efi/ipxe.efi && cp bin-x86_64-efi/ipxe.efi /out/pureboot.efi"
+
+    if [ -f "$INSTALL_DIR/tftp/uefi/pureboot.efi" ]; then
+        log_info "Created: tftp/uefi/pureboot.efi"
+    else
+        log_warn "UEFI bootloader build failed - using stock ipxe.efi"
+    fi
+
+    # Build BIOS bootloader
+    log_info "Building BIOS bootloader (undionly.kpxe)..."
+    docker run --rm \
+        -v "$BUILD_DIR:/build" \
+        -v "$INSTALL_DIR/tftp/bios:/out" \
+        pureboot/ipxe-builder \
+        "make EMBED=/build/embed.ipxe bin/undionly.kpxe && cp bin/undionly.kpxe /out/pureboot.kpxe"
+
+    if [ -f "$INSTALL_DIR/tftp/bios/pureboot.kpxe" ]; then
+        log_info "Created: tftp/bios/pureboot.kpxe"
+    else
+        log_warn "BIOS bootloader build failed - using stock undionly.kpxe"
+    fi
+
+    rm -rf "$BUILD_DIR"
+    trap - EXIT
+
+    log_info "Custom bootloader build complete"
+}
+
 copy_application_files() {
     log_info "Copying application files..."
 
     # Remove old source (but preserve data, tftp, assets, .env, .venv)
     rm -rf "$INSTALL_DIR/src"
     rm -rf "$INSTALL_DIR/frontend"
+    rm -rf "$INSTALL_DIR/scripts"
+    rm -rf "$INSTALL_DIR/docker"
 
     # Copy new source
     cp -r "$PROJECT_ROOT/src" "$INSTALL_DIR/"
     cp -r "$PROJECT_ROOT/frontend" "$INSTALL_DIR/"
+    cp -r "$PROJECT_ROOT/scripts" "$INSTALL_DIR/"
+    cp -r "$PROJECT_ROOT/docker" "$INSTALL_DIR/"
     cp "$PROJECT_ROOT/requirements.txt" "$INSTALL_DIR/"
     cp "$PROJECT_ROOT/pyproject.toml" "$INSTALL_DIR/" 2>/dev/null || true
 }
@@ -270,6 +398,8 @@ do_install() {
     check_node_version
     create_service_user
     create_directories
+    download_bootloaders
+    build_custom_bootloaders
     copy_application_files
     setup_venv
     install_python_deps
