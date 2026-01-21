@@ -4,8 +4,9 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from src.api.routes import boot, ipxe, nodes, groups, storage, files, luns
 from src.db.database import init_db, close_db
@@ -107,10 +108,8 @@ app.include_router(storage.router, prefix="/api/v1", tags=["storage"])
 app.include_router(files.router, prefix="/api/v1", tags=["files"])
 app.include_router(luns.router, prefix="/api/v1", tags=["luns"])
 
-# Mount static files for assets (if directory exists)
+# Static assets directory
 assets_dir = Path("assets")
-if assets_dir.exists():
-    app.mount("/assets", StaticFiles(directory="assets"), name="assets")
 
 
 @app.get("/health")
@@ -121,6 +120,41 @@ async def health_check():
         "tftp_enabled": tftp_server is not None,
         "dhcp_proxy_enabled": dhcp_proxy is not None,
     }
+
+
+# Serve React SPA - must be after API routes
+# Mount static assets subdirectory if it exists (contains JS, CSS from Vite build)
+assets_subdir = assets_dir / "assets"
+if assets_subdir.exists():
+    app.mount("/assets", StaticFiles(directory=str(assets_subdir)), name="static-assets")
+
+
+@app.get("/")
+async def serve_spa_root():
+    """Serve the React SPA index.html at root."""
+    index_file = assets_dir / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+    return {"error": "Frontend not built. Run 'npm run build' in frontend directory."}
+
+
+@app.get("/{full_path:path}")
+async def serve_spa_catchall(request: Request, full_path: str):
+    """Serve static files or fallback to index.html for SPA routing."""
+    # Skip API paths (should be handled by routers above)
+    if full_path.startswith("api/"):
+        return {"error": "Not found"}
+
+    # Try to serve the exact file first
+    file_path = assets_dir / full_path
+    if file_path.exists() and file_path.is_file():
+        return FileResponse(file_path)
+
+    # Fallback to index.html for SPA client-side routing
+    index_file = assets_dir / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+    return {"error": "Frontend not built. Run 'npm run build' in frontend directory."}
 
 
 def main():
