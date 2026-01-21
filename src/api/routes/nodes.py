@@ -1,5 +1,5 @@
 """Node management API endpoints."""
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
@@ -319,8 +319,8 @@ async def report_node_status(
 ):
     """Report node status and update information.
 
-    Called by nodes to report their current status and update
-    hardware information after OS boot.
+    Called by nodes to report their current status, update
+    hardware information, and report installation progress.
     """
     # Look up node by MAC
     result = await db.execute(
@@ -337,7 +337,7 @@ async def report_node_status(
         )
 
     # Update node information
-    node.last_seen_at = datetime.utcnow()
+    node.last_seen_at = datetime.now(timezone.utc)
 
     if report.ip_address:
         node.ip_address = report.ip_address
@@ -352,10 +352,58 @@ async def report_node_status(
     if report.system_uuid:
         node.system_uuid = report.system_uuid
 
+    # Handle installation status reporting
+    message = "Status reported successfully"
+
+    if report.installation_status:
+        try:
+            if report.installation_status == "started" and node.state == "pending":
+                # Node started installing
+                await StateTransitionService.transition(
+                    db=db,
+                    node=node,
+                    to_state="installing",
+                    triggered_by="node_report",
+                )
+                node.install_attempts = 0
+                message = "Installation started"
+
+            elif report.installation_status == "complete" and node.state == "installing":
+                # Installation succeeded
+                await StateTransitionService.transition(
+                    db=db,
+                    node=node,
+                    to_state="installed",
+                    triggered_by="node_report",
+                )
+                message = "Installation completed"
+
+            elif report.installation_status == "failed" and node.state == "installing":
+                # Installation failed
+                await StateTransitionService.handle_install_failure(
+                    db=db,
+                    node=node,
+                    error=report.installation_error,
+                )
+                if node.state == "install_failed":
+                    message = f"Installation failed after {node.install_attempts} attempts"
+                else:
+                    message = f"Installation failed (attempt {node.install_attempts}), will retry"
+
+            elif report.installation_status == "progress":
+                # Progress update - no state change
+                pass
+
+        except InvalidStateTransition as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot process installation status: {str(e)}",
+            )
+
     await db.flush()
     await db.refresh(node, ["tags"])
 
     return ApiResponse(
         data=NodeResponse.from_node(node),
-        message="Status reported successfully",
+        message=message,
     )

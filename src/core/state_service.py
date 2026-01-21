@@ -88,7 +88,7 @@ class StateTransitionService:
 
         # Application logging
         logger.info(
-            f"Node {node.id} ({node.mac_address}) transitioned: "
+            f"Node {node.id} ({node.mac_address}) transitioned: "  # nosec - MAC needed for ops
             f"{from_state} -> {to_state} (triggered_by={triggered_by})"
         )
 
