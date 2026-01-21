@@ -66,10 +66,19 @@ class TestNodeStateMachine:
         assert "migrating" in valid
         assert "retired" in valid
 
+    def test_installing_to_install_failed_allowed(self):
+        """Can transition from installing to install_failed."""
+        assert NodeStateMachine.can_transition("installing", "install_failed") is True
+
+    def test_install_failed_to_pending_allowed(self):
+        """Can transition from install_failed to pending."""
+        assert NodeStateMachine.can_transition("install_failed", "pending") is True
+
     def test_all_states_defined(self):
         """All expected states are defined."""
         expected = {
             "discovered", "pending", "installing", "installed",
-            "active", "reprovision", "deprovisioning", "migrating", "retired"
+            "active", "reprovision", "deprovisioning", "migrating",
+            "install_failed", "retired"
         }
         assert set(NodeStateMachine.STATES) == expected

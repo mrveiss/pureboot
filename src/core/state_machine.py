@@ -20,6 +20,7 @@ class NodeStateMachine:
         discovered: Node appeared via PXE, waiting for admin action
         pending: Workflow assigned, ready for next PXE boot
         installing: OS installation in progress
+        install_failed: Installation failed after max retries
         installed: Installation complete, ready for local boot
         active: Running from local disk
         reprovision: Marked for reinstallation
@@ -32,6 +33,7 @@ class NodeStateMachine:
         "discovered",
         "pending",
         "installing",
+        "install_failed",
         "installed",
         "active",
         "reprovision",
@@ -43,7 +45,8 @@ class NodeStateMachine:
     TRANSITIONS: ClassVar[dict[str, list[str]]] = {
         "discovered": ["pending"],
         "pending": ["installing"],
-        "installing": ["installed"],
+        "installing": ["installed", "install_failed"],
+        "install_failed": ["pending"],
         "installed": ["active"],
         "active": ["reprovision", "deprovisioning", "migrating"],
         "reprovision": ["pending"],
