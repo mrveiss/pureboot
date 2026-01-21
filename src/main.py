@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 
 from src.api.routes import boot, ipxe, nodes, groups, storage, files, luns, system
 from src.api.routes.sync_jobs import router as sync_jobs_router
+from src.api.routes.workflows import router as workflows_router
 from src.db.database import init_db, close_db, async_session_factory
 from src.config import settings
 from src.pxe.tftp_server import TFTPServer
@@ -148,6 +149,7 @@ app.include_router(files.router, prefix="/api/v1", tags=["files"])
 app.include_router(luns.router, prefix="/api/v1", tags=["luns"])
 app.include_router(system.router, prefix="/api/v1", tags=["system"])
 app.include_router(sync_jobs_router, prefix="/api/v1", tags=["sync-jobs"])
+app.include_router(workflows_router, prefix="/api/v1", tags=["workflows"])
 
 # Static assets directory
 assets_dir = Path("assets")
