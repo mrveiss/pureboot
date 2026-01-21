@@ -4,6 +4,7 @@ import { Server, Activity, AlertCircle, CheckCircle, Clock, ArrowRight } from 'l
 import { useNodeStats, useNodes } from '@/hooks'
 import { NODE_STATE_COLORS, NODE_STATE_LABELS, type NodeState } from '@/types'
 import { cn } from '@/lib/utils'
+import { DhcpSetupBanner } from '@/components/dashboard'
 
 function StatCard({
   title,
@@ -74,6 +75,9 @@ export function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {/* DHCP Setup Banner */}
+      <DhcpSetupBanner />
+
       <div className="flex items-center justify-between">
         <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
         <Link
