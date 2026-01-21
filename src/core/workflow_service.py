@@ -31,9 +31,32 @@ class Workflow(BaseModel):
 class WorkflowService:
     """Load and manage workflow definitions from JSON files."""
 
-    def __init__(self, workflows_dir: Path):
+    def __init__(self, workflows_dir: Path) -> None:
         """Initialize with workflows directory path."""
         self.workflows_dir = workflows_dir
+
+    def _validate_workflow_path(self, workflow_id: str) -> Path:
+        """
+        Validate and return safe workflow file path.
+
+        Args:
+            workflow_id: Workflow identifier (filename without .json)
+
+        Returns:
+            Validated Path to workflow file
+
+        Raises:
+            ValueError: If workflow_id contains path traversal sequences
+        """
+        # Resolve the path to catch traversal attempts
+        workflow_path = (self.workflows_dir / f"{workflow_id}.json").resolve()
+        workflows_dir_resolved = self.workflows_dir.resolve()
+
+        # Ensure the path is within the workflows directory
+        if not str(workflow_path).startswith(str(workflows_dir_resolved) + "/"):
+            raise ValueError(f"Invalid workflow_id: {workflow_id}")
+
+        return workflow_path
 
     def get_workflow(self, workflow_id: str) -> Workflow:
         """
@@ -47,8 +70,9 @@ class WorkflowService:
 
         Raises:
             WorkflowNotFoundError: If workflow file doesn't exist
+            ValueError: If workflow_id contains path traversal sequences
         """
-        workflow_path = self.workflows_dir / f"{workflow_id}.json"
+        workflow_path = self._validate_workflow_path(workflow_id)
 
         if not workflow_path.exists():
             raise WorkflowNotFoundError(workflow_id)

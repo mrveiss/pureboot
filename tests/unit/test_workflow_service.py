@@ -100,3 +100,25 @@ class TestWorkflowService:
 
         assert workflow.architecture == "x86_64"
         assert workflow.boot_mode == "bios"
+
+    def test_get_workflow_rejects_path_traversal(self, tmp_path: Path):
+        """get_workflow raises ValueError for path traversal attempts."""
+        service = WorkflowService(tmp_path)
+
+        with pytest.raises(ValueError, match="Invalid workflow_id"):
+            service.get_workflow("../../../etc/passwd")
+
+    def test_get_workflow_rejects_path_traversal_encoded(self, tmp_path: Path):
+        """get_workflow raises ValueError for encoded path traversal."""
+        service = WorkflowService(tmp_path)
+
+        with pytest.raises(ValueError, match="Invalid workflow_id"):
+            service.get_workflow("..%2F..%2Fetc/passwd")
+
+    def test_get_workflow_rejects_absolute_path(self, tmp_path: Path):
+        """get_workflow raises ValueError for absolute path injection."""
+        service = WorkflowService(tmp_path)
+
+        # This tests attempting to inject an absolute path
+        with pytest.raises(ValueError, match="Invalid workflow_id"):
+            service.get_workflow("/etc/passwd/../../../tmp/evil")
