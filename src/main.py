@@ -146,8 +146,9 @@ async def serve_spa_catchall(request: Request, full_path: str):
         return {"error": "Not found"}
 
     # Try to serve the exact file first
-    file_path = assets_dir / full_path
-    if file_path.exists() and file_path.is_file():
+    # Resolve the path and verify it stays within assets_dir to prevent path traversal
+    file_path = (assets_dir / full_path).resolve()
+    if file_path.is_relative_to(assets_dir.resolve()) and file_path.exists() and file_path.is_file():
         return FileResponse(file_path)
 
     # Fallback to index.html for SPA client-side routing
