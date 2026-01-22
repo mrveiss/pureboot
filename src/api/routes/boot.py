@@ -1,6 +1,6 @@
 """Boot API endpoint for iPXE."""
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
@@ -8,12 +8,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
+from src.core.workflow_service import Workflow, WorkflowNotFoundError, WorkflowService
 from src.db.database import get_db
 from src.db.models import Node
 
 router = APIRouter()
 
 MAC_PATTERN = re.compile(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$")
+
+workflow_service = WorkflowService(settings.workflows_dir)
 
 
 def normalize_mac(mac: str) -> str:
@@ -66,6 +69,63 @@ echo
 echo Installation will begin on next boot with assigned workflow.
 echo Booting from local disk...
 sleep 5
+exit
+"""
+
+
+def generate_install_script(node: Node, workflow: Workflow, server: str) -> str:
+    """Generate iPXE script for OS installation."""
+    kernel_url = f"{server}{workflow.kernel_path}"
+    initrd_url = f"{server}{workflow.initrd_path}"
+
+    return f"""#!ipxe
+# PureBoot - Installing {workflow.name}
+# Node: {node.mac_address}
+# Workflow: {workflow.id}
+echo
+echo ======================================
+echo  PureBoot OS Installation
+echo ======================================
+echo
+echo Workflow: {workflow.name}
+echo Node MAC: {node.mac_address}
+echo
+echo Loading kernel...
+kernel {kernel_url} {workflow.cmdline}
+echo Loading initrd...
+initrd {initrd_url}
+echo
+echo Starting installation...
+boot
+"""
+
+
+def generate_pending_no_workflow_script(node: Node) -> str:
+    """Generate iPXE script for pending node without workflow."""
+    return f"""#!ipxe
+# PureBoot - Pending (no workflow assigned)
+# Node: {node.mac_address}
+echo
+echo Node is pending but no workflow assigned.
+echo Please assign a workflow in the PureBoot UI.
+echo
+echo Booting from local disk in 10 seconds...
+sleep 10
+exit
+"""
+
+
+def generate_workflow_error_script(node: Node, workflow_id: str) -> str:
+    """Generate iPXE script for workflow not found error."""
+    return f"""#!ipxe
+# PureBoot - Workflow Error
+# Node: {node.mac_address}
+echo
+echo ERROR: Workflow '{workflow_id}' not found.
+echo Please verify workflow exists or assign a different one.
+echo
+echo Booting from local disk...
+sleep 10
 exit
 """
 
@@ -131,7 +191,7 @@ async def get_boot_script(
         return generate_discovery_script(mac, server)
 
     # Update last seen and hardware info
-    node.last_seen_at = datetime.utcnow()
+    node.last_seen_at = datetime.now(timezone.utc)
     if client_ip:
         node.ip_address = client_ip
     if vendor and not node.vendor:
@@ -148,7 +208,24 @@ async def get_boot_script(
         case "discovered":
             return generate_discovery_script(mac, server)
         case "pending":
-            return generate_pending_script(node, server)
+            # Check if workflow is assigned
+            if not node.workflow_id:
+                return generate_pending_no_workflow_script(node)
+
+            # Load workflow and generate install script
+            try:
+                workflow = workflow_service.get_workflow(node.workflow_id)
+                # Resolve variables in cmdline
+                workflow = workflow_service.resolve_variables(
+                    workflow,
+                    server=server,
+                    node_id=str(node.id),
+                    mac=node.mac_address,
+                    ip=node.ip_address,
+                )
+                return generate_install_script(node, workflow, server)
+            except (WorkflowNotFoundError, ValueError):
+                return generate_workflow_error_script(node, node.workflow_id)
         case "installing":
             # Let installation continue, boot local
             return generate_local_boot_script()

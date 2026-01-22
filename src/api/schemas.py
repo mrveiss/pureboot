@@ -811,3 +811,25 @@ class SyncProgress(BaseModel):
     bytes_transferred: int
     progress_percent: int
     error: str | None
+
+
+# ============== Workflow Schemas ==============
+
+
+class WorkflowResponse(BaseModel):
+    """Workflow definition for OS installation."""
+
+    id: str
+    name: str
+    kernel_path: str
+    initrd_path: str
+    cmdline: str
+    architecture: str = "x86_64"
+    boot_mode: str = "bios"
+
+
+class WorkflowListResponse(BaseModel):
+    """Response for workflow listing."""
+
+    data: list[WorkflowResponse]
+    total: int

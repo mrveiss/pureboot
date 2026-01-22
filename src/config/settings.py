@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     port: int = 8080
     debug: bool = False
 
+    # Workflow definitions directory
+    workflows_dir: Path = Path("/var/lib/pureboot/workflows")
+
     tftp: TFTPSettings = Field(default_factory=TFTPSettings)
     dhcp_proxy: DHCPProxySettings = Field(default_factory=DHCPProxySettings)
     boot_menu: BootMenuSettings = Field(default_factory=BootMenuSettings)

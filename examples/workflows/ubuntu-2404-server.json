@@ -1,0 +1,9 @@
+{
+  "id": "ubuntu-2404-server",
+  "name": "Ubuntu 24.04 LTS Server",
+  "kernel_path": "/api/v1/files/default/workflows/ubuntu-2404/vmlinuz",
+  "initrd_path": "/api/v1/files/default/workflows/ubuntu-2404/initrd",
+  "cmdline": "ip=dhcp autoinstall ds=nocloud-net;s=${server}/api/v1/autoinstall/${node_id}/",
+  "architecture": "x86_64",
+  "boot_mode": "bios"
+}
