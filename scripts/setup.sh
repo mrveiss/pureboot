@@ -215,33 +215,27 @@ download_bootloaders() {
         log_info "undionly.kpxe already exists"
     fi
 
-    # Copy GRUB UEFI bootloaders from system packages (for Hyper-V and other UEFI systems)
+    # Copy GRUB UEFI bootloaders (for Hyper-V and other UEFI systems)
     if [ ! -f "$INSTALL_DIR/tftp/bootx64.efi" ]; then
-        log_info "Installing GRUB UEFI bootloaders..."
-        # Install grub-efi-amd64-signed and shim-signed packages
-        if apt-get install -y -qq grub-efi-amd64-signed shim-signed > /dev/null 2>&1; then
-            # Copy signed bootloaders
-            if [ -f /usr/lib/shim/shimx64.efi.signed ]; then
-                cp /usr/lib/shim/shimx64.efi.signed "$INSTALL_DIR/tftp/bootx64.efi"
-                log_info "Copied bootx64.efi (signed shim)"
-            elif [ -f /usr/lib/shim/shimx64.efi ]; then
-                cp /usr/lib/shim/shimx64.efi "$INSTALL_DIR/tftp/bootx64.efi"
-                log_info "Copied bootx64.efi (shim)"
-            fi
-
-            if [ -f /usr/lib/grub/x86_64-efi-signed/grubnetx64.efi.signed ]; then
-                cp /usr/lib/grub/x86_64-efi-signed/grubnetx64.efi.signed "$INSTALL_DIR/tftp/grubx64.efi"
-                log_info "Copied grubx64.efi (signed GRUB)"
-            elif [ -f /usr/lib/grub/x86_64-efi/monolithic/grubnetx64.efi ]; then
-                cp /usr/lib/grub/x86_64-efi/monolithic/grubnetx64.efi "$INSTALL_DIR/tftp/grubx64.efi"
-                log_info "Copied grubx64.efi (GRUB)"
-            fi
+        if [ -f "$PROJECT_ROOT/bootloaders/bootx64.efi" ]; then
+            cp "$PROJECT_ROOT/bootloaders/bootx64.efi" "$INSTALL_DIR/tftp/"
+            log_info "Copied bootx64.efi (UEFI shim)"
         else
-            log_warn "Failed to install GRUB packages - GRUB UEFI boot will not work"
-            log_info "You can manually copy bootx64.efi and grubx64.efi to $INSTALL_DIR/tftp/"
+            log_warn "bootx64.efi not found in bootloaders/ - GRUB UEFI boot will not work"
         fi
     else
         log_info "bootx64.efi already exists"
+    fi
+
+    if [ ! -f "$INSTALL_DIR/tftp/grubx64.efi" ]; then
+        if [ -f "$PROJECT_ROOT/bootloaders/grubx64.efi" ]; then
+            cp "$PROJECT_ROOT/bootloaders/grubx64.efi" "$INSTALL_DIR/tftp/"
+            log_info "Copied grubx64.efi (GRUB UEFI)"
+        else
+            log_warn "grubx64.efi not found in bootloaders/ - GRUB UEFI boot will not work"
+        fi
+    else
+        log_info "grubx64.efi already exists"
     fi
 
     # Create default GRUB config if not exists
