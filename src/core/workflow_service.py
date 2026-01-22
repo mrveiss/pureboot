@@ -21,11 +21,15 @@ class Workflow(BaseModel):
 
     id: str
     name: str
-    kernel_path: str
-    initrd_path: str
-    cmdline: str
+    kernel_path: str = ""
+    initrd_path: str = ""
+    cmdline: str = ""
     architecture: str = "x86_64"
     boot_mode: str = "bios"
+    # Install method: "kernel" (default), "sanboot" (ISO), "chain" (chainload URL)
+    install_method: str = "kernel"
+    # For sanboot/chain: the URL to boot from
+    boot_url: str = ""
 
 
 class WorkflowService:
@@ -139,6 +143,15 @@ class WorkflowService:
         if ip:
             cmdline = cmdline.replace("${ip}", ip)
 
+        # Also resolve variables in boot_url if present
+        boot_url = workflow.boot_url
+        if boot_url:
+            boot_url = boot_url.replace("${server}", server)
+            boot_url = boot_url.replace("${node_id}", node_id)
+            boot_url = boot_url.replace("${mac}", mac)
+            if ip:
+                boot_url = boot_url.replace("${ip}", ip)
+
         return Workflow(
             id=workflow.id,
             name=workflow.name,
@@ -147,4 +160,6 @@ class WorkflowService:
             cmdline=cmdline,
             architecture=workflow.architecture,
             boot_mode=workflow.boot_mode,
+            install_method=workflow.install_method,
+            boot_url=boot_url,
         )

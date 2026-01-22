@@ -116,15 +116,21 @@ exit
 
 
 def generate_install_script(node: Node, workflow: Workflow, server: str) -> str:
-    """Generate iPXE script for OS installation."""
-    kernel_url = f"{server}{workflow.kernel_path}"
-    initrd_url = f"{server}{workflow.initrd_path}"
+    """Generate iPXE script for OS installation.
+
+    Supports three install methods:
+    - kernel: Traditional kernel/initrd boot (default)
+    - sanboot: Boot directly from ISO URL
+    - chain: Chainload to another iPXE script/URL
+    """
     short_id = node.mac_address.replace(":", "")[-6:].upper()
 
-    return f"""#!ipxe
+    # Common header for all methods
+    header = f"""#!ipxe
 # PureBoot - Installing {workflow.name}
 # Node: {node.mac_address}
 # Workflow: {workflow.id}
+# Method: {workflow.install_method}
 echo
 echo ========================================
 echo   PureBoot - OS Installation
@@ -134,15 +140,69 @@ echo   Node ID:  {short_id}
 echo   MAC:      {node.mac_address}
 echo   IP:       ${{net0/ip}}
 echo   Workflow: {workflow.name}
+echo   Method:   {workflow.install_method}
 echo
-echo Loading kernel...
-kernel {kernel_url} {workflow.cmdline}
+"""
+
+    # Generate boot commands based on install method
+    if workflow.install_method == "sanboot":
+        # Boot directly from ISO (for live installers)
+        boot_url = workflow.boot_url
+        if not boot_url:
+            return generate_workflow_error_script(node, "sanboot method requires boot_url")
+        boot_commands = f"""echo Booting from ISO: {boot_url}
+echo
+echo This may take several minutes to download...
+echo
+sanboot {boot_url} || goto error
+
+:error
+echo
+echo *** BOOT FAILED ***
+echo Failed to boot from ISO.
+echo Press any key to enter iPXE shell.
+sleep 30 || shell
+exit
+"""
+    elif workflow.install_method == "chain":
+        # Chainload to another URL (for custom boot scripts)
+        boot_url = workflow.boot_url
+        if not boot_url:
+            return generate_workflow_error_script(node, "chain method requires boot_url")
+        boot_commands = f"""echo Chainloading: {boot_url}
+echo
+chain {boot_url} || goto error
+
+:error
+echo
+echo *** CHAIN FAILED ***
+echo Failed to chainload boot script.
+echo Press any key to enter iPXE shell.
+sleep 30 || shell
+exit
+"""
+    else:
+        # Default: kernel/initrd boot
+        kernel_url = f"{server}{workflow.kernel_path}"
+        initrd_url = f"{server}{workflow.initrd_path}"
+        boot_commands = f"""echo Loading kernel...
+kernel {kernel_url} {workflow.cmdline} || goto error
 echo Loading initrd...
-initrd {initrd_url}
+initrd {initrd_url} || goto error
 echo
 echo Starting installation...
 boot
+
+:error
+echo
+echo *** BOOT FAILED ***
+echo Failed to load kernel or initrd.
+echo Press any key to enter iPXE shell.
+sleep 30 || shell
+exit
 """
+
+    return header + boot_commands
 
 
 def generate_pending_no_workflow_script(node: Node) -> str:
