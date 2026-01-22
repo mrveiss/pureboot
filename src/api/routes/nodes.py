@@ -1,11 +1,12 @@
 """Node management API endpoints."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.config import settings
 from src.api.schemas import (
     ApiListResponse,
     ApiResponse,
@@ -88,6 +89,37 @@ async def create_node(
     return ApiResponse(
         data=NodeResponse.from_node(node),
         message="Node registered successfully",
+    )
+
+
+@router.get("/nodes/stalled", response_model=ApiListResponse[NodeResponse])
+async def get_stalled_nodes(
+    db: AsyncSession = Depends(get_db),
+):
+    """Get nodes with timed-out installations.
+
+    Returns nodes in 'installing' state that have exceeded
+    the install_timeout_minutes threshold.
+    """
+    if settings.install_timeout_minutes <= 0:
+        return ApiListResponse(data=[], total=0)
+
+    timeout_threshold = datetime.now(timezone.utc) - timedelta(
+        minutes=settings.install_timeout_minutes
+    )
+
+    result = await db.execute(
+        select(Node)
+        .options(selectinload(Node.tags))
+        .where(Node.state == "installing")
+        .where(Node.state_changed_at < timeout_threshold)
+        .order_by(Node.state_changed_at.asc())
+    )
+    nodes = result.scalars().all()
+
+    return ApiListResponse(
+        data=[NodeResponse.from_node(n) for n in nodes],
+        total=len(nodes),
     )
 
 
