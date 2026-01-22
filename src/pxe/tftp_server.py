@@ -234,35 +234,13 @@ class TFTPTransfer:
     async def send_file(self, filename: str, options: dict) -> bool:
         """Send file to client with proper ACK handling."""
         try:
-            # Parse requested options
+            # Use standard 512-byte blocks for maximum compatibility
+            # Many TFTP servers (Synology, basic tftpd) ignore options entirely
+            # and just send data - clients handle this gracefully
             blksize = DEFAULT_BLKSIZE
-            if "blksize" in options:
-                blksize = int(options.get("blksize", DEFAULT_BLKSIZE))
-                blksize = min(blksize, MAX_BLKSIZE)
 
-            # Send OACK only if client requested options
-            # Only echo back options the client actually requested
-            if options:
-                oack_options = {}
-
-                if "blksize" in options:
-                    oack_options["blksize"] = str(blksize)
-
-                if "tsize" in options:
-                    try:
-                        tsize = self.handler.get_file_size(filename)
-                        oack_options["tsize"] = str(tsize)
-                    except FileNotFoundError:
-                        pass  # Don't include tsize if file not found yet
-
-                if oack_options:
-                    oack = TFTPPacket.build_oack(oack_options)
-                    self.transport.sendto(oack, self.client_addr)
-
-                    # Wait for ACK 0
-                    if not await self.wait_for_ack(0):
-                        logger.error("No ACK for OACK")
-                        return False
+            # Don't send OACK - just start sending data immediately
+            # This matches Synology TFTP behavior which works with Hyper-V
 
             # Send file data
             block_num = 1
@@ -325,7 +303,7 @@ class TFTPServerProtocol(asyncio.DatagramProtocol):
             packet = TFTPPacket.parse(data)
 
             if packet.opcode == OpCode.RRQ:
-                logger.info(f"RRQ from {addr}: {packet.filename}")
+                logger.info(f"RRQ from {addr}: {packet.filename} options={packet.options}")
                 if self.on_request:
                     self.on_request(addr, packet.filename)
                 # Start transfer in background task with dedicated socket
