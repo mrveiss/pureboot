@@ -234,13 +234,38 @@ class TFTPTransfer:
     async def send_file(self, filename: str, options: dict) -> bool:
         """Send file to client with proper ACK handling."""
         try:
-            # Use standard 512-byte blocks for maximum compatibility
-            # Many TFTP servers (Synology, basic tftpd) ignore options entirely
-            # and just send data - clients handle this gracefully
             blksize = DEFAULT_BLKSIZE
 
-            # Don't send OACK - just start sending data immediately
-            # This matches Synology TFTP behavior which works with Hyper-V
+            # Handle TFTP options (RFC 2347)
+            if options:
+                # Build OACK with options we support
+                oack_options = {}
+
+                # tsize - report file size if client requested it
+                if "tsize" in options:
+                    try:
+                        file_size = self.handler.get_file_size(filename)
+                        oack_options["tsize"] = str(file_size)
+                    except FileNotFoundError:
+                        pass
+
+                # blksize - accept requested block size (up to our max)
+                if "blksize" in options:
+                    requested = int(options["blksize"])
+                    blksize = min(requested, MAX_BLKSIZE)
+                    oack_options["blksize"] = str(blksize)
+
+                # Send OACK if we have any options to acknowledge
+                if oack_options:
+                    oack_packet = TFTPPacket.build_oack(oack_options)
+                    logger.info(f"Sending OACK: {oack_options} (packet: {oack_packet.hex()})")
+                    self.transport.sendto(oack_packet, self.client_addr)
+
+                    # Wait for ACK 0 (client acknowledges OACK)
+                    if not await self.wait_for_ack(0):
+                        logger.error("No ACK for OACK")
+                        return False
+                    logger.info("OACK acknowledged by client")
 
             # Send file data
             block_num = 1
