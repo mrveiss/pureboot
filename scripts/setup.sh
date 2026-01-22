@@ -189,15 +189,25 @@ create_directories() {
 download_bootloaders() {
     log_info "Downloading bootloaders..."
 
-    IPXE_BASE_URL="https://boot.ipxe.org"
+    # Use netboot.xyz iPXE which has bzImage support for kernel loading
+    # The standard ipxe.org binaries lack IMAGE_BZIMAGE in UEFI mode
+    # snponly = Simple Network Protocol driver, no embedded scripts - boots via DHCP
+    IPXE_UEFI_URL="https://boot.netboot.xyz/ipxe/netboot.xyz-snponly.efi"
+    IPXE_BIOS_URL="https://boot.ipxe.org/undionly.kpxe"
 
-    # Download iPXE UEFI bootloader
+    # Download iPXE UEFI bootloader (netboot.xyz SNP version with bzImage support)
     if [ ! -f "$INSTALL_DIR/tftp/uefi/ipxe.efi" ]; then
-        log_info "Downloading ipxe.efi (UEFI x64)..."
-        if curl -fsSL "$IPXE_BASE_URL/ipxe.efi" -o "$INSTALL_DIR/tftp/uefi/ipxe.efi"; then
-            log_info "Downloaded ipxe.efi"
+        log_info "Downloading iPXE UEFI (netboot.xyz SNP with bzImage support)..."
+        if curl -fsSL "$IPXE_UEFI_URL" -o "$INSTALL_DIR/tftp/uefi/ipxe.efi"; then
+            log_info "Downloaded ipxe.efi (netboot.xyz snponly)"
         else
-            log_warn "Failed to download ipxe.efi - iPXE UEFI boot will not work"
+            # Fallback to standard ipxe.org (may lack bzImage support)
+            log_warn "Failed to download netboot.xyz iPXE, trying ipxe.org fallback..."
+            if curl -fsSL "https://boot.ipxe.org/ipxe.efi" -o "$INSTALL_DIR/tftp/uefi/ipxe.efi"; then
+                log_warn "Downloaded ipxe.efi from ipxe.org - kernel boot may fail in UEFI"
+            else
+                log_warn "Failed to download ipxe.efi - iPXE UEFI boot will not work"
+            fi
         fi
     else
         log_info "ipxe.efi already exists"
@@ -206,7 +216,7 @@ download_bootloaders() {
     # Download iPXE BIOS bootloader
     if [ ! -f "$INSTALL_DIR/tftp/bios/undionly.kpxe" ]; then
         log_info "Downloading undionly.kpxe (BIOS)..."
-        if curl -fsSL "$IPXE_BASE_URL/undionly.kpxe" -o "$INSTALL_DIR/tftp/bios/undionly.kpxe"; then
+        if curl -fsSL "$IPXE_BIOS_URL" -o "$INSTALL_DIR/tftp/bios/undionly.kpxe"; then
             log_info "Downloaded undionly.kpxe"
         else
             log_warn "Failed to download undionly.kpxe - iPXE BIOS boot will not work"
