@@ -186,11 +186,11 @@ exit
         image_url = workflow.image_url
         if not image_url:
             return generate_workflow_error_script(node, "image method requires image_url")
-        # Use PureBoot's deploy kernel/initrd (virt for UEFI compatibility)
-        deploy_kernel = f"{server}/tftp/deploy/vmlinuz-virt"
+        # Use .efi extension so iPXE recognizes it as EFI binary
+        deploy_kernel = f"{server}/tftp/deploy/vmlinuz-virt.efi"
         deploy_initrd = f"{server}/tftp/deploy/initramfs-virt"
         # Pass deployment parameters via kernel cmdline
-        # CRITICAL: initrd=initramfs-virt tells UEFI EFI_STUB kernel where to find initrd
+        # initrd= tells the EFI stub kernel the initrd filename
         deploy_cmdline = (
             f"initrd=initramfs-virt "
             f"ip=dhcp "
@@ -199,23 +199,26 @@ exit
             f"pureboot.mac={node.mac_address} "
             f"pureboot.image_url={image_url} "
             f"pureboot.target={workflow.target_device} "
-            f"pureboot.callback={server}/api/v1/nodes/{node.id}/installed"
+            f"pureboot.callback={server}/api/v1/nodes/{node.id}/installed "
+            f"console=ttyS0 console=tty0"
         )
         if workflow.post_script_url:
             deploy_cmdline += f" pureboot.post_script={workflow.post_script_url}"
-        # Use classic kernel/initrd/boot commands for better UEFI compatibility
+        # For UEFI: use imgfetch to load kernel as EFI binary, then imgexec
+        # iPXE EFI cannot use bzImage format, but can execute EFI_STUB kernels directly
         boot_commands = f"""echo Image-based deployment
 echo
 echo   Image:  {image_url}
 echo   Target: {workflow.target_device}
 echo
-echo Loading kernel from {deploy_kernel}...
-kernel {deploy_kernel} {deploy_cmdline} console=ttyS0 console=tty0 || goto kerror
-echo Loading initrd from {deploy_initrd}...
-initrd {deploy_initrd} || goto ierror
+echo Downloading initrd from {deploy_initrd}...
+imgfetch --name initramfs-virt {deploy_initrd} || goto ierror
+echo Downloading kernel (EFI) from {deploy_kernel}...
+imgfetch --name kernel {deploy_kernel} || goto kerror
 echo
-echo Starting image deployment...
-boot || goto booterror
+echo Booting kernel as EFI binary...
+imgargs kernel {deploy_cmdline}
+imgexec kernel || goto booterror
 
 :kerror
 echo
@@ -244,11 +247,11 @@ shell
     elif workflow.install_method == "clone":
         # Clone mode: this node serves its disk as source for other nodes
         # Boots into deploy environment and runs disk server
-        # Use virt kernel for better UEFI/Hyper-V compatibility
-        deploy_kernel = f"{server}/tftp/deploy/vmlinuz-virt"
+        # Use .efi extension so iPXE recognizes it as EFI binary
+        deploy_kernel = f"{server}/tftp/deploy/vmlinuz-virt.efi"
         deploy_initrd = f"{server}/tftp/deploy/initramfs-virt"
         # Pass clone server parameters via kernel cmdline
-        # CRITICAL: initrd=initramfs-virt tells UEFI EFI_STUB kernel where to find initrd
+        # initrd= tells the EFI stub kernel the initrd filename
         deploy_cmdline = (
             f"initrd=initramfs-virt "
             f"ip=dhcp "
@@ -257,9 +260,11 @@ shell
             f"pureboot.mac={node.mac_address} "
             f"pureboot.mode=clone_source "
             f"pureboot.source_device={workflow.source_device} "
-            f"pureboot.callback={server}/api/v1/nodes/{node.id}/clone-ready"
+            f"pureboot.callback={server}/api/v1/nodes/{node.id}/clone-ready "
+            f"console=ttyS0 console=tty0"
         )
-        # Use classic kernel/initrd/boot commands for better UEFI compatibility
+        # For UEFI: use imgfetch to load kernel as EFI binary, then imgexec
+        # iPXE EFI cannot use bzImage format, but can execute EFI_STUB kernels directly
         boot_commands = f"""echo Clone Source Mode
 echo
 echo   This node will serve its disk for cloning
@@ -268,13 +273,14 @@ echo
 echo   Other nodes can clone from this machine.
 echo   Do NOT shut down until cloning is complete.
 echo
-echo Loading kernel from {deploy_kernel}...
-kernel {deploy_kernel} {deploy_cmdline} console=ttyS0 console=tty0 || goto kerror
-echo Loading initrd from {deploy_initrd}...
-initrd {deploy_initrd} || goto ierror
+echo Downloading initrd from {deploy_initrd}...
+imgfetch --name initramfs-virt {deploy_initrd} || goto ierror
+echo Downloading kernel (EFI) from {deploy_kernel}...
+imgfetch --name kernel {deploy_kernel} || goto kerror
 echo
-echo Starting clone source...
-boot || goto booterror
+echo Booting kernel as EFI binary...
+imgargs kernel {deploy_cmdline}
+imgexec kernel || goto booterror
 
 :kerror
 echo

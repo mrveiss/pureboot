@@ -31,10 +31,10 @@ RUN sed -i 's/#undef\tDOWNLOAD_PROTO_HTTPS/#define DOWNLOAD_PROTO_HTTPS/' config
     sed -i 's/\/\/#define CPAIR_CMD/#define CPAIR_CMD/' config/general.h && \
     sed -i 's/\/\/#define CONSOLE_FRAMEBUFFER/#define CONSOLE_FRAMEBUFFER/' config/console.h || true
 
-# CRITICAL: Enable IMAGE_BZIMAGE for EFI builds (it's only in BIOS block by default)
-# Add unconditional define right after IMAGE_EFI (which has leading whitespace)
-RUN sed -i '/#define IMAGE_EFI\s/a #define IMAGE_BZIMAGE\t\t/* Linux bzImage (forced for EFI) */' config/general.h && \
-    grep -n IMAGE_BZIMAGE config/general.h
+# NOTE: IMAGE_BZIMAGE cannot be enabled for EFI builds - they're mutually exclusive
+# EFI iPXE can only boot EFI binaries directly. For Linux kernels, use:
+# 1. Unified Kernel Images (UKI) - bundles kernel+initrd+cmdline as EFI binary
+# 2. Direct EFI stub boot (kernel with CONFIG_EFI_STUB as .efi file)
 
 # Use shell as entrypoint so we can run complex commands
 ENTRYPOINT ["/bin/sh", "-c"]
