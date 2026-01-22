@@ -234,24 +234,12 @@ class TFTPTransfer:
     async def send_file(self, filename: str, options: dict) -> bool:
         """Send file to client with proper ACK handling."""
         try:
-            blksize = int(options.get("blksize", DEFAULT_BLKSIZE))
-            blksize = min(blksize, MAX_BLKSIZE)
+            # Many UEFI implementations don't properly support TFTP options (RFC 2347)
+            # Always use standard 512-byte blocks for maximum compatibility
+            blksize = DEFAULT_BLKSIZE
 
-            # Send OACK if options were requested
-            if options:
-                try:
-                    tsize = self.handler.get_file_size(filename)
-                    oack_options = {"blksize": str(blksize), "tsize": str(tsize)}
-                except FileNotFoundError:
-                    oack_options = {"blksize": str(blksize)}
-
-                oack = TFTPPacket.build_oack(oack_options)
-                self.transport.sendto(oack, self.client_addr)
-
-                # Wait for ACK 0
-                if not await self.wait_for_ack(0):
-                    logger.error(f"No ACK for OACK")
-                    return False
+            # Skip OACK entirely - some clients (like Hyper-V UEFI) reject it
+            # Just start sending data blocks immediately
 
             # Send file data
             block_num = 1
