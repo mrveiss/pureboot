@@ -268,6 +268,22 @@ class NodeReport(BaseModel):
     """Node status report from the node itself."""
 
     mac_address: str
+
+    # Event-based reporting (new)
+    event: Literal[
+        "boot_started",
+        "install_started",
+        "install_progress",
+        "install_complete",
+        "install_failed",
+        "first_boot",
+        "heartbeat",
+    ] | None = None
+    status: Literal["success", "failed", "in_progress"] = "success"
+    message: str | None = None
+    event_metadata: dict | None = None
+
+    # Hardware/network info
     ip_address: str | None = None
     hostname: str | None = None
     vendor: str | None = None
@@ -275,7 +291,7 @@ class NodeReport(BaseModel):
     serial_number: str | None = None
     system_uuid: str | None = None
 
-    # Installation reporting
+    # Legacy installation reporting (backwards compatibility)
     installation_status: Literal["started", "progress", "complete", "failed"] | None = None
     installation_progress: int | None = None  # 0-100
     installation_error: str | None = None
