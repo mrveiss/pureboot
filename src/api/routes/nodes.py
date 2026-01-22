@@ -1,7 +1,7 @@
 """Node management API endpoints."""
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -18,10 +18,11 @@ from src.api.schemas import (
     StateTransition,
     TagCreate,
 )
+from src.core.event_service import EventService
 from src.core.state_machine import InvalidStateTransition, NodeStateMachine
 from src.core.state_service import StateTransitionService
 from src.db.database import get_db
-from src.db.models import Node, NodeStateLog, NodeTag
+from src.db.models import Node, NodeEvent, NodeStateLog, NodeTag
 
 router = APIRouter()
 
@@ -315,12 +316,17 @@ async def remove_node_tag(
 @router.post("/report", response_model=ApiResponse[NodeResponse])
 async def report_node_status(
     report: NodeReport,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Report node status and update information.
 
     Called by nodes to report their current status, update
     hardware information, and report installation progress.
+
+    Supports both:
+    - New event-based reporting (event field)
+    - Legacy installation_status reporting (backwards compatible)
     """
     # Look up node by MAC
     result = await db.execute(
@@ -335,6 +341,9 @@ async def report_node_status(
             status_code=404,
             detail=f"Node with MAC {report.mac_address} not found",
         )
+
+    # Get client IP
+    client_ip = request.client.host if request.client else report.ip_address
 
     # Update node information
     node.last_seen_at = datetime.now(timezone.utc)
@@ -352,13 +361,54 @@ async def report_node_status(
     if report.system_uuid:
         node.system_uuid = report.system_uuid
 
-    # Handle installation status reporting
     message = "Status reported successfully"
 
-    if report.installation_status:
-        try:
-            if report.installation_status == "started" and node.state == "pending":
-                # Node started installing
+    # Handle new event-based reporting
+    if report.event:
+        message = await _handle_event(db, node, report, client_ip)
+
+    # Handle legacy installation_status (backwards compatibility)
+    elif report.installation_status:
+        message = await _handle_legacy_installation_status(db, node, report, client_ip)
+
+    await db.flush()
+    await db.refresh(node)
+
+    return ApiResponse(
+        data=NodeResponse.from_node(node),
+        message=message,
+    )
+
+
+async def _handle_event(
+    db: AsyncSession,
+    node: Node,
+    report: NodeReport,
+    client_ip: str | None,
+) -> str:
+    """Handle event-based reporting."""
+    event_type = report.event
+    message = "Event logged"
+
+    # Log the event
+    await EventService.log_event(
+        db=db,
+        node=node,
+        event_type=event_type,
+        status=report.status,
+        message=report.message,
+        progress=report.installation_progress,
+        metadata=report.event_metadata,
+        ip_address=client_ip,
+    )
+
+    # Handle state transitions based on event
+    match event_type:
+        case "boot_started":
+            message = "Boot started event logged"
+
+        case "install_started":
+            if node.state == "pending":
                 await StateTransitionService.transition(
                     db=db,
                     node=node,
@@ -368,8 +418,11 @@ async def report_node_status(
                 node.install_attempts = 0
                 message = "Installation started"
 
-            elif report.installation_status == "complete" and node.state == "installing":
-                # Installation succeeded
+        case "install_progress":
+            message = f"Installation progress: {report.installation_progress or 0}%"
+
+        case "install_complete":
+            if node.state == "installing":
                 await StateTransitionService.transition(
                     db=db,
                     node=node,
@@ -378,32 +431,93 @@ async def report_node_status(
                 )
                 message = "Installation completed"
 
-            elif report.installation_status == "failed" and node.state == "installing":
-                # Installation failed
+        case "install_failed":
+            if node.state == "installing":
                 await StateTransitionService.handle_install_failure(
                     db=db,
                     node=node,
-                    error=report.installation_error,
+                    error=report.message or report.installation_error,
                 )
                 if node.state == "install_failed":
                     message = f"Installation failed after {node.install_attempts} attempts"
                 else:
                     message = f"Installation failed (attempt {node.install_attempts}), will retry"
 
-            elif report.installation_status == "progress":
-                # Progress update - no state change
-                pass
+        case "first_boot":
+            if node.state == "installed":
+                await StateTransitionService.transition(
+                    db=db,
+                    node=node,
+                    to_state="active",
+                    triggered_by="node_report",
+                    metadata=report.event_metadata,
+                )
+                message = "First boot - node now active"
 
-        except InvalidStateTransition as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Cannot process installation status: {str(e)}",
-            )
+        case "heartbeat":
+            message = "Heartbeat received"
 
-    await db.flush()
-    await db.refresh(node, ["tags"])
+    return message
 
-    return ApiResponse(
-        data=NodeResponse.from_node(node),
-        message=message,
+
+async def _handle_legacy_installation_status(
+    db: AsyncSession,
+    node: Node,
+    report: NodeReport,
+    client_ip: str | None,
+) -> str:
+    """Handle legacy installation_status field for backwards compatibility."""
+    message = "Status reported successfully"
+
+    # Map legacy status to event type for logging
+    event_type_map = {
+        "started": "install_started",
+        "progress": "install_progress",
+        "complete": "install_complete",
+        "failed": "install_failed",
+    }
+    event_type = event_type_map.get(report.installation_status, "unknown")
+
+    # Log as event
+    await EventService.log_event(
+        db=db,
+        node=node,
+        event_type=event_type,
+        status="success" if report.installation_status != "failed" else "failed",
+        message=report.installation_error,
+        progress=report.installation_progress,
+        ip_address=client_ip,
     )
+
+    # Handle state transitions (existing logic)
+    if report.installation_status == "started" and node.state == "pending":
+        await StateTransitionService.transition(
+            db=db,
+            node=node,
+            to_state="installing",
+            triggered_by="node_report",
+        )
+        node.install_attempts = 0
+        message = "Installation started"
+
+    elif report.installation_status == "complete" and node.state == "installing":
+        await StateTransitionService.transition(
+            db=db,
+            node=node,
+            to_state="installed",
+            triggered_by="node_report",
+        )
+        message = "Installation completed"
+
+    elif report.installation_status == "failed" and node.state == "installing":
+        await StateTransitionService.handle_install_failure(
+            db=db,
+            node=node,
+            error=report.installation_error,
+        )
+        if node.state == "install_failed":
+            message = f"Installation failed after {node.install_attempts} attempts"
+        else:
+            message = f"Installation failed (attempt {node.install_attempts}), will retry"
+
+    return message
