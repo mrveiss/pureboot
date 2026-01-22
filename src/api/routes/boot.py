@@ -51,43 +51,42 @@ def generate_discovery_script(mac: str, server: str) -> str:
 
 :start
 echo
-echo ========================================
-echo   PureBoot - Node Discovered
-echo ========================================
+echo
+echo  ************************************************************
+echo  *                                                          *
+echo  *                    P U R E B O O T                       *
+echo  *              Network Boot Management System              *
+echo  *                                                          *
+echo  *     Press ESC now to skip and boot from local disk       *
+echo  *                                                          *
+echo  ************************************************************
 echo
 echo   Node ID:  {short_id}
 echo   MAC:      {mac}
 echo   IP:       ${{net0/ip}}
-echo   Gateway:  ${{net0/gateway}}
 echo   Server:   {server}
 echo
-echo   Status: Waiting for workflow assignment
-echo   Assign a workflow in the web UI to provision.
-echo
-echo ========================================
-echo
-echo   Press ESC for iPXE shell
-echo   Auto-polling for workflow in 15 seconds...
+echo   Status: Discovered - awaiting workflow assignment
 echo
 
 :prompt
-prompt --key 0x1b --timeout 15000 Waiting... && goto shell ||
+prompt --key 0x1b --timeout 10000 Press ESC to skip, waiting 10s... && goto skip ||
 
 :wait
 echo
-echo [${{net0/ip}}] Checking for workflow assignment...
+echo [{short_id}] Polling server for workflow...
 chain {server}/api/v1/boot?mac={mac} || goto retry
 
 :retry
-echo [${{net0/ip}}] Server unreachable, retrying in 30 seconds...
-sleep 30
+echo [{short_id}] Server unreachable, retry in 30s (ESC to skip)...
+prompt --key 0x1b --timeout 30000 && goto skip ||
 goto wait
 
-:shell
+:skip
 echo
-echo iPXE Shell - type 'goto start' to return
-shell
-goto start
+echo Skipping PureBoot - booting from local disk...
+echo
+exit
 """
 
 
