@@ -52,7 +52,7 @@ class EventService:
         db.add(event)
 
         logger.info(
-            f"Node {node.id} ({node.mac_address}) event: {event_type} ({status})"
+            f"Node {node.id} event: {event_type} ({status})"  # nosec - MAC omitted
         )
 
         return event
