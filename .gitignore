@@ -53,9 +53,11 @@ Thumbs.db
 *.log
 logs/
 
-# Build artifacts
+# Build artifacts (except bootloaders/ which we keep in repo)
 *.kpxe
 *.efi
+!bootloaders/**/*.kpxe
+!bootloaders/**/*.efi
 
 # Git worktrees
 .worktrees/

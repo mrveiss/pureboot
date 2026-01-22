@@ -186,56 +186,30 @@ create_directories() {
     mkdir -p "$INSTALL_DIR/data"
 }
 
-download_bootloaders() {
-    log_info "Downloading bootloaders..."
+install_bootloaders() {
+    log_info "Installing bootloaders from repository..."
 
-    # Use netboot.xyz iPXE which has bzImage support for kernel loading
-    # The standard ipxe.org binaries lack IMAGE_BZIMAGE in UEFI mode
-    # snponly = Simple Network Protocol driver, no embedded scripts - boots via DHCP
-    IPXE_UEFI_URL="https://boot.netboot.xyz/ipxe/netboot.xyz-snponly.efi"
-    IPXE_BIOS_URL="https://boot.ipxe.org/undionly.kpxe"
+    # All bootloaders are stored in the repo to avoid external dependencies
+    # bootloaders/uefi/ipxe.efi - netboot.xyz-snponly.efi with bzImage support
+    # bootloaders/bios/undionly.kpxe - standard iPXE BIOS bootloader
 
-    # Download iPXE UEFI bootloader (netboot.xyz SNP version with bzImage support)
-    if [ ! -f "$INSTALL_DIR/tftp/uefi/ipxe.efi" ]; then
-        log_info "Downloading iPXE UEFI (netboot.xyz SNP with bzImage support)..."
-        if curl -fsSL "$IPXE_UEFI_URL" -o "$INSTALL_DIR/tftp/uefi/ipxe.efi"; then
-            log_info "Downloaded ipxe.efi (netboot.xyz snponly)"
-        else
-            # Fallback to standard ipxe.org (may lack bzImage support)
-            log_warn "Failed to download netboot.xyz iPXE, trying ipxe.org fallback..."
-            if curl -fsSL "https://boot.ipxe.org/ipxe.efi" -o "$INSTALL_DIR/tftp/uefi/ipxe.efi"; then
-                log_warn "Downloaded ipxe.efi from ipxe.org - kernel boot may fail in UEFI"
-            else
-                log_warn "Failed to download ipxe.efi - iPXE UEFI boot will not work"
-            fi
-        fi
+    # Install iPXE UEFI bootloader
+    if [ -f "$PROJECT_ROOT/bootloaders/uefi/ipxe.efi" ]; then
+        cp "$PROJECT_ROOT/bootloaders/uefi/ipxe.efi" "$INSTALL_DIR/tftp/uefi/ipxe.efi"
+        log_info "Installed ipxe.efi (UEFI with bzImage support)"
+        # Also copy as netboot.xyz.efi for chainload fallback
+        cp "$PROJECT_ROOT/bootloaders/uefi/ipxe.efi" "$INSTALL_DIR/tftp/uefi/netboot.xyz.efi"
+        log_info "Installed netboot.xyz.efi (chainload fallback)"
     else
-        log_info "ipxe.efi already exists"
+        log_error "bootloaders/uefi/ipxe.efi not found - UEFI boot will not work"
     fi
 
-    # Also download as netboot.xyz.efi for chainload fallback (same file, different name)
-    # This is used when the initial iPXE lacks bzImage support
-    if [ ! -f "$INSTALL_DIR/tftp/uefi/netboot.xyz.efi" ]; then
-        log_info "Downloading netboot.xyz.efi for chainload fallback..."
-        if curl -fsSL "$IPXE_UEFI_URL" -o "$INSTALL_DIR/tftp/uefi/netboot.xyz.efi"; then
-            log_info "Downloaded netboot.xyz.efi"
-        else
-            log_warn "Failed to download netboot.xyz.efi - chainload fallback will not work"
-        fi
+    # Install iPXE BIOS bootloader
+    if [ -f "$PROJECT_ROOT/bootloaders/bios/undionly.kpxe" ]; then
+        cp "$PROJECT_ROOT/bootloaders/bios/undionly.kpxe" "$INSTALL_DIR/tftp/bios/undionly.kpxe"
+        log_info "Installed undionly.kpxe (BIOS)"
     else
-        log_info "netboot.xyz.efi already exists"
-    fi
-
-    # Download iPXE BIOS bootloader
-    if [ ! -f "$INSTALL_DIR/tftp/bios/undionly.kpxe" ]; then
-        log_info "Downloading undionly.kpxe (BIOS)..."
-        if curl -fsSL "$IPXE_BIOS_URL" -o "$INSTALL_DIR/tftp/bios/undionly.kpxe"; then
-            log_info "Downloaded undionly.kpxe"
-        else
-            log_warn "Failed to download undionly.kpxe - iPXE BIOS boot will not work"
-        fi
-    else
-        log_info "undionly.kpxe already exists"
+        log_error "bootloaders/bios/undionly.kpxe not found - BIOS boot will not work"
     fi
 
     # Copy GRUB UEFI bootloaders (for Hyper-V and other UEFI systems)
@@ -448,7 +422,7 @@ do_install() {
     check_node_version
     create_service_user
     create_directories
-    download_bootloaders
+    install_bootloaders
     build_custom_bootloaders
     copy_application_files
     setup_venv
