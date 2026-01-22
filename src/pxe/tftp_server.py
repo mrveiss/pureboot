@@ -136,6 +136,8 @@ class TFTPHandler:
 
     def _resolve_path(self, filename: str) -> Path:
         """Resolve filename to safe path within root."""
+        # Strip leading slashes - TFTP paths are relative to root
+        filename = filename.lstrip("/")
         # Normalize and resolve
         requested = (self.root / filename).resolve()
 
