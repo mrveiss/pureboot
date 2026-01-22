@@ -181,6 +181,47 @@ echo Press any key to enter iPXE shell.
 sleep 30 || shell
 exit
 """
+    elif workflow.install_method == "image":
+        # Image-based deployment: boot deploy kernel, stream disk image
+        image_url = workflow.image_url
+        if not image_url:
+            return generate_workflow_error_script(node, "image method requires image_url")
+        # Use PureBoot's deploy kernel/initrd
+        deploy_kernel = f"{server}/tftp/deploy/vmlinuz"
+        deploy_initrd = f"{server}/tftp/deploy/initrd"
+        # Pass deployment parameters via kernel cmdline
+        deploy_cmdline = (
+            f"ip=dhcp "
+            f"pureboot.server={server} "
+            f"pureboot.node_id={node.id} "
+            f"pureboot.mac={node.mac_address} "
+            f"pureboot.image_url={image_url} "
+            f"pureboot.target={workflow.target_device} "
+            f"pureboot.callback={server}/api/v1/nodes/{node.id}/installed"
+        )
+        if workflow.post_script_url:
+            deploy_cmdline += f" pureboot.post_script={workflow.post_script_url}"
+        boot_commands = f"""echo Image-based deployment
+echo
+echo   Image:  {image_url}
+echo   Target: {workflow.target_device}
+echo
+echo Loading deploy kernel...
+kernel {deploy_kernel} {deploy_cmdline} || goto error
+echo Loading deploy initrd...
+initrd {deploy_initrd} || goto error
+echo
+echo Starting image deployment...
+boot
+
+:error
+echo
+echo *** BOOT FAILED ***
+echo Failed to load deploy kernel.
+echo Press any key to enter iPXE shell.
+sleep 30 || shell
+exit
+"""
     else:
         # Default: kernel/initrd boot
         kernel_url = f"{server}{workflow.kernel_path}"

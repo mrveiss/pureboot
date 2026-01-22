@@ -26,10 +26,15 @@ class Workflow(BaseModel):
     cmdline: str = ""
     architecture: str = "x86_64"
     boot_mode: str = "bios"
-    # Install method: "kernel" (default), "sanboot" (ISO), "chain" (chainload URL)
+    # Install method: "kernel" (default), "sanboot" (ISO), "chain" (chainload URL), "image" (disk image)
     install_method: str = "kernel"
     # For sanboot/chain: the URL to boot from
     boot_url: str = ""
+    # For image method: disk image URL and target device
+    image_url: str = ""
+    target_device: str = "/dev/sda"
+    # Post-deploy script URL (optional)
+    post_script_url: str = ""
 
 
 class WorkflowService:
@@ -152,6 +157,24 @@ class WorkflowService:
             if ip:
                 boot_url = boot_url.replace("${ip}", ip)
 
+        # Resolve variables in image_url if present
+        image_url = workflow.image_url
+        if image_url:
+            image_url = image_url.replace("${server}", server)
+            image_url = image_url.replace("${node_id}", node_id)
+            image_url = image_url.replace("${mac}", mac)
+            if ip:
+                image_url = image_url.replace("${ip}", ip)
+
+        # Resolve variables in post_script_url if present
+        post_script_url = workflow.post_script_url
+        if post_script_url:
+            post_script_url = post_script_url.replace("${server}", server)
+            post_script_url = post_script_url.replace("${node_id}", node_id)
+            post_script_url = post_script_url.replace("${mac}", mac)
+            if ip:
+                post_script_url = post_script_url.replace("${ip}", ip)
+
         return Workflow(
             id=workflow.id,
             name=workflow.name,
@@ -162,4 +185,7 @@ class WorkflowService:
             boot_mode=workflow.boot_mode,
             install_method=workflow.install_method,
             boot_url=boot_url,
+            image_url=image_url,
+            target_device=workflow.target_device,
+            post_script_url=post_script_url,
         )
