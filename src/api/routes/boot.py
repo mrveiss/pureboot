@@ -46,14 +46,57 @@ def generate_discovery_script(mac: str, server: str) -> str:
     return f"""#!ipxe
 # PureBoot - Node discovered
 # MAC: {mac}
+
+:start
+console --picture http://{server.replace('http://', '')}/assets/pureboot-logo.png 2>/dev/null || echo
+
 echo
-echo Node registered with PureBoot server.
-echo Waiting for provisioning assignment...
+echo ========================================
+echo   PureBoot - Node Discovered
+echo ========================================
 echo
-echo Booting from local disk in 10 seconds...
-echo Press any key to enter iPXE shell.
-sleep 10 || shell
+echo   MAC Address: {mac}
+echo   Server: {server}
+echo
+echo   This node has been registered with PureBoot.
+echo   Assign a workflow in the web UI to provision.
+echo
+echo ========================================
+echo
+
+:menu
+menu PureBoot Discovery Menu
+item --gap -- --------------------------------
+item wait      Wait for workflow assignment (polls every 30s)
+item local     Boot from local disk
+item shell     Drop to iPXE shell
+item reboot    Reboot system
+item --gap -- --------------------------------
+choose --default wait --timeout 30000 target && goto ${{target}} || goto wait
+
+:wait
+echo
+echo Checking for workflow assignment...
+chain {server}/api/v1/boot?mac={mac} || goto retry
+
+:retry
+echo Server unreachable, retrying in 30 seconds...
+sleep 30
+goto wait
+
+:local
+echo
+echo Booting from local disk...
 exit
+
+:shell
+echo
+echo Type 'goto menu' to return to the menu.
+shell
+goto menu
+
+:reboot
+reboot
 """
 
 
