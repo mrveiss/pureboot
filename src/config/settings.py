@@ -13,11 +13,19 @@ class TFTPSettings(BaseSettings):
 
 
 class DHCPProxySettings(BaseSettings):
-    """Proxy DHCP settings."""
+    """Proxy DHCP settings.
+
+    The proxy DHCP server enables two-stage PXE booting:
+    1. Raw firmware → iPXE binary (via TFTP)
+    2. iPXE → HTTP boot script (via HTTP)
+
+    This allows stock iPXE binaries to work without embedded scripts.
+    """
     enabled: bool = False
     host: str = "0.0.0.0"
     port: int = 4011
-    tftp_server: str | None = None  # Auto-detect if None
+    tftp_server: str | None = None  # Auto-detect from main host if None
+    http_server: str | None = None  # Auto-detect from main host:port if None
 
 
 class BootMenuSettings(BaseSettings):

@@ -64,8 +64,13 @@ async def lifespan(app: FastAPI):
     # Start Proxy DHCP if enabled
     if settings.dhcp_proxy.enabled:
         tftp_addr = settings.dhcp_proxy.tftp_server or settings.host
+        http_addr = (
+            settings.dhcp_proxy.http_server
+            or f"{settings.host}:{settings.port}"
+        )
         dhcp_proxy = DHCPProxy(
             tftp_server=tftp_addr,
+            http_server=http_addr,
             host=settings.dhcp_proxy.host,
             port=settings.dhcp_proxy.port
         )
