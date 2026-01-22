@@ -181,49 +181,82 @@ create_directories() {
     mkdir -p "$INSTALL_DIR"
     mkdir -p "$INSTALL_DIR/tftp/bios"
     mkdir -p "$INSTALL_DIR/tftp/uefi"
+    mkdir -p "$INSTALL_DIR/tftp/grub"
     mkdir -p "$INSTALL_DIR/assets"
     mkdir -p "$INSTALL_DIR/data"
 }
 
 download_bootloaders() {
-    log_info "Downloading iPXE bootloaders..."
+    log_info "Downloading bootloaders..."
 
     IPXE_BASE_URL="https://boot.ipxe.org"
 
-    # Download UEFI bootloader
+    # Download iPXE UEFI bootloader
     if [ ! -f "$INSTALL_DIR/tftp/uefi/ipxe.efi" ]; then
         log_info "Downloading ipxe.efi (UEFI x64)..."
         if curl -fsSL "$IPXE_BASE_URL/ipxe.efi" -o "$INSTALL_DIR/tftp/uefi/ipxe.efi"; then
             log_info "Downloaded ipxe.efi"
         else
-            log_warn "Failed to download ipxe.efi - UEFI PXE boot will not work"
+            log_warn "Failed to download ipxe.efi - iPXE UEFI boot will not work"
         fi
     else
         log_info "ipxe.efi already exists"
     fi
 
-    # Download BIOS bootloader
+    # Download iPXE BIOS bootloader
     if [ ! -f "$INSTALL_DIR/tftp/bios/undionly.kpxe" ]; then
         log_info "Downloading undionly.kpxe (BIOS)..."
         if curl -fsSL "$IPXE_BASE_URL/undionly.kpxe" -o "$INSTALL_DIR/tftp/bios/undionly.kpxe"; then
             log_info "Downloaded undionly.kpxe"
         else
-            log_warn "Failed to download undionly.kpxe - BIOS PXE boot will not work"
+            log_warn "Failed to download undionly.kpxe - iPXE BIOS boot will not work"
         fi
     else
         log_info "undionly.kpxe already exists"
     fi
 
-    # Download UEFI 32-bit bootloader (for older UEFI systems)
-    if [ ! -f "$INSTALL_DIR/tftp/uefi/ipxe32.efi" ]; then
-        log_info "Downloading ipxe32.efi (UEFI x86)..."
-        if curl -fsSL "$IPXE_BASE_URL/ipxe32.efi" -o "$INSTALL_DIR/tftp/uefi/ipxe32.efi"; then
-            log_info "Downloaded ipxe32.efi"
+    # Copy GRUB UEFI bootloaders from system packages (for Hyper-V and other UEFI systems)
+    if [ ! -f "$INSTALL_DIR/tftp/bootx64.efi" ]; then
+        log_info "Installing GRUB UEFI bootloaders..."
+        # Install grub-efi-amd64-signed and shim-signed packages
+        if apt-get install -y -qq grub-efi-amd64-signed shim-signed > /dev/null 2>&1; then
+            # Copy signed bootloaders
+            if [ -f /usr/lib/shim/shimx64.efi.signed ]; then
+                cp /usr/lib/shim/shimx64.efi.signed "$INSTALL_DIR/tftp/bootx64.efi"
+                log_info "Copied bootx64.efi (signed shim)"
+            elif [ -f /usr/lib/shim/shimx64.efi ]; then
+                cp /usr/lib/shim/shimx64.efi "$INSTALL_DIR/tftp/bootx64.efi"
+                log_info "Copied bootx64.efi (shim)"
+            fi
+
+            if [ -f /usr/lib/grub/x86_64-efi-signed/grubnetx64.efi.signed ]; then
+                cp /usr/lib/grub/x86_64-efi-signed/grubnetx64.efi.signed "$INSTALL_DIR/tftp/grubx64.efi"
+                log_info "Copied grubx64.efi (signed GRUB)"
+            elif [ -f /usr/lib/grub/x86_64-efi/monolithic/grubnetx64.efi ]; then
+                cp /usr/lib/grub/x86_64-efi/monolithic/grubnetx64.efi "$INSTALL_DIR/tftp/grubx64.efi"
+                log_info "Copied grubx64.efi (GRUB)"
+            fi
         else
-            log_warn "Failed to download ipxe32.efi - UEFI 32-bit PXE boot will not work"
+            log_warn "Failed to install GRUB packages - GRUB UEFI boot will not work"
+            log_info "You can manually copy bootx64.efi and grubx64.efi to $INSTALL_DIR/tftp/"
         fi
     else
-        log_info "ipxe32.efi already exists"
+        log_info "bootx64.efi already exists"
+    fi
+
+    # Create default GRUB config if not exists
+    if [ ! -f "$INSTALL_DIR/tftp/grub/grub.cfg" ]; then
+        log_info "Creating default GRUB config..."
+        cat > "$INSTALL_DIR/tftp/grub/grub.cfg" << 'GRUBCFG'
+# PureBoot GRUB Configuration
+set default=0
+set timeout=5
+
+menuentry "Boot from local disk" {
+    exit
+}
+GRUBCFG
+        log_info "Created grub/grub.cfg"
     fi
 
     log_info "Bootloader download complete"
