@@ -201,9 +201,14 @@ class TFTPTransfer:
                 self.last_ack_block = packet.block_num
                 self.ack_event.set()
             elif packet.opcode == OpCode.ERROR:
-                logger.error(f"Client error: {packet.error_message}")
-                self.done = True
-                self.ack_event.set()
+                # Hyper-V UEFI sends "User aborted" immediately but then retries
+                # Only abort if we've already started sending data
+                if self.last_ack_block >= 0:
+                    logger.error(f"Client error during transfer: {packet.error_message}")
+                    self.done = True
+                    self.ack_event.set()
+                else:
+                    logger.warning(f"Client sent early error (ignoring): {packet.error_message}")
         except Exception as e:
             logger.error(f"Error parsing ACK: {e}")
 
