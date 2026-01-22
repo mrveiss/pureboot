@@ -75,6 +75,26 @@ install_system_packages() {
     apt-get update -qq
     apt-get install -y -qq software-properties-common libcap2-bin curl > /dev/null
 
+    # Install Docker for building custom iPXE with bzImage support
+    if ! command -v docker &> /dev/null; then
+        log_info "Installing Docker..."
+        apt-get install -y -qq ca-certificates gnupg > /dev/null
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg 2>/dev/null || true
+        chmod a+r /etc/apt/keyrings/docker.gpg 2>/dev/null || true
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
+        apt-get update -qq
+        if apt-get install -y -qq docker-ce docker-ce-cli containerd.io > /dev/null 2>&1; then
+            log_info "Docker installed successfully"
+            systemctl enable docker > /dev/null 2>&1 || true
+            systemctl start docker > /dev/null 2>&1 || true
+        else
+            log_warn "Failed to install Docker - will use pre-built bootloaders from repo"
+        fi
+    else
+        log_info "Docker already installed"
+    fi
+
     # Install Python 3.11+ from deadsnakes PPA if needed
     CURRENT_PYTHON=$(python3 --version 2>&1 | cut -d' ' -f2 | cut -d'.' -f1,2)
     if [ "$(printf '%s\n' "3.11" "$CURRENT_PYTHON" | sort -V | head -n1)" != "3.11" ]; then
@@ -186,31 +206,34 @@ create_directories() {
     mkdir -p "$INSTALL_DIR/data"
 }
 
-install_bootloaders() {
-    log_info "Installing bootloaders from repository..."
+install_bootloaders_from_repo() {
+    # Fallback: Install pre-built bootloaders from repository
+    # Used when Docker build fails or is unavailable
+    log_info "Installing fallback bootloaders from repository..."
 
-    # All bootloaders are stored in the repo to avoid external dependencies
-    # bootloaders/uefi/ipxe.efi - netboot.xyz-snponly.efi with bzImage support
-    # bootloaders/bios/undionly.kpxe - standard iPXE BIOS bootloader
+    # These are pre-built binaries stored in the repo
+    # They may lack some features but provide basic functionality
 
     # Install iPXE UEFI bootloader
     if [ -f "$PROJECT_ROOT/bootloaders/uefi/ipxe.efi" ]; then
         cp "$PROJECT_ROOT/bootloaders/uefi/ipxe.efi" "$INSTALL_DIR/tftp/uefi/ipxe.efi"
-        log_info "Installed ipxe.efi (UEFI with bzImage support)"
-        # Also copy as netboot.xyz.efi for chainload fallback
+        log_info "Installed ipxe.efi from repo (fallback)"
         cp "$PROJECT_ROOT/bootloaders/uefi/ipxe.efi" "$INSTALL_DIR/tftp/uefi/netboot.xyz.efi"
-        log_info "Installed netboot.xyz.efi (chainload fallback)"
     else
-        log_error "bootloaders/uefi/ipxe.efi not found - UEFI boot will not work"
+        log_warn "bootloaders/uefi/ipxe.efi not found"
     fi
 
     # Install iPXE BIOS bootloader
     if [ -f "$PROJECT_ROOT/bootloaders/bios/undionly.kpxe" ]; then
         cp "$PROJECT_ROOT/bootloaders/bios/undionly.kpxe" "$INSTALL_DIR/tftp/bios/undionly.kpxe"
-        log_info "Installed undionly.kpxe (BIOS)"
+        log_info "Installed undionly.kpxe from repo (fallback)"
     else
-        log_error "bootloaders/bios/undionly.kpxe not found - BIOS boot will not work"
+        log_warn "bootloaders/bios/undionly.kpxe not found"
     fi
+}
+
+install_bootloaders() {
+    log_info "Setting up bootloaders..."
 
     # Copy GRUB UEFI bootloaders (for Hyper-V and other UEFI systems)
     if [ ! -f "$INSTALL_DIR/tftp/bootx64.efi" ]; then
@@ -254,11 +277,12 @@ GRUBCFG
 }
 
 build_custom_bootloaders() {
-    # Only build if Docker is available
+    # Build iPXE with bzImage support using Docker
+    # This is the primary method - creates bootloaders with all required features
+
     if ! command -v docker &> /dev/null; then
-        log_info "Docker not available - skipping custom bootloader build"
-        log_info "To build custom branded bootloaders later, run:"
-        log_info "  $INSTALL_DIR/scripts/build-ipxe.sh <server_ip>:8080"
+        log_warn "Docker not available - using fallback bootloaders from repo"
+        install_bootloaders_from_repo
         return 0
     fi
 
@@ -266,13 +290,14 @@ build_custom_bootloaders() {
     SERVER_IP=$(hostname -I | awk '{print $1}')
     SERVER_ADDR="${SERVER_IP}:8080"
 
-    log_info "Building custom PureBoot bootloaders for $SERVER_ADDR..."
+    log_info "Building iPXE bootloaders with bzImage support..."
     log_info "This may take a few minutes on first run..."
 
     # Build Docker image
     log_info "Building iPXE builder Docker image..."
-    if ! docker build -t pureboot/ipxe-builder "$PROJECT_ROOT/docker/ipxe-builder"; then
-        log_warn "Failed to build Docker image - using stock bootloaders"
+    if ! docker build -t pureboot/ipxe-builder "$PROJECT_ROOT/docker/ipxe-builder" > /dev/null 2>&1; then
+        log_warn "Failed to build Docker image - using fallback bootloaders"
+        install_bootloaders_from_repo
         return 0
     fi
 
@@ -280,7 +305,34 @@ build_custom_bootloaders() {
     BUILD_DIR=$(mktemp -d)
     trap "rm -rf $BUILD_DIR" EXIT
 
-    # Generate embedded script with PureBoot branding
+    # Build plain ipxe.efi (no embedded script, with bzImage support)
+    # This is served via TFTP and boots from DHCP
+    log_info "Building UEFI bootloader (ipxe.efi with bzImage support)..."
+    if docker run --rm \
+        -v "$INSTALL_DIR/tftp/uefi:/out" \
+        pureboot/ipxe-builder \
+        "make bin-x86_64-efi/ipxe.efi && cp bin-x86_64-efi/ipxe.efi /out/ipxe.efi" > /dev/null 2>&1; then
+        log_info "Built ipxe.efi with bzImage support"
+        # Also copy as netboot.xyz.efi for chainload fallback
+        cp "$INSTALL_DIR/tftp/uefi/ipxe.efi" "$INSTALL_DIR/tftp/uefi/netboot.xyz.efi"
+    else
+        log_warn "UEFI bootloader build failed"
+        install_bootloaders_from_repo
+        return 0
+    fi
+
+    # Build plain undionly.kpxe (no embedded script)
+    log_info "Building BIOS bootloader (undionly.kpxe)..."
+    if docker run --rm \
+        -v "$INSTALL_DIR/tftp/bios:/out" \
+        pureboot/ipxe-builder \
+        "make bin/undionly.kpxe && cp bin/undionly.kpxe /out/undionly.kpxe" > /dev/null 2>&1; then
+        log_info "Built undionly.kpxe"
+    else
+        log_warn "BIOS bootloader build failed"
+    fi
+
+    # Also build branded versions with embedded script (optional)
     cat > "$BUILD_DIR/embed.ipxe" << SCRIPT
 #!ipxe
 # PureBoot Network Boot
@@ -299,38 +351,24 @@ echo
 chain http://$SERVER_ADDR/api/v1/ipxe/boot.ipxe || shell
 SCRIPT
 
-    # Build UEFI bootloader
-    log_info "Building UEFI bootloader (ipxe.efi)..."
+    log_info "Building branded UEFI bootloader (pureboot.efi)..."
     docker run --rm \
         -v "$BUILD_DIR:/build" \
         -v "$INSTALL_DIR/tftp/uefi:/out" \
         pureboot/ipxe-builder \
-        "make EMBED=/build/embed.ipxe bin-x86_64-efi/ipxe.efi && cp bin-x86_64-efi/ipxe.efi /out/pureboot.efi"
+        "make EMBED=/build/embed.ipxe bin-x86_64-efi/ipxe.efi && cp bin-x86_64-efi/ipxe.efi /out/pureboot.efi" > /dev/null 2>&1 || true
 
-    if [ -f "$INSTALL_DIR/tftp/uefi/pureboot.efi" ]; then
-        log_info "Created: tftp/uefi/pureboot.efi"
-    else
-        log_warn "UEFI bootloader build failed - using stock ipxe.efi"
-    fi
-
-    # Build BIOS bootloader
-    log_info "Building BIOS bootloader (undionly.kpxe)..."
+    log_info "Building branded BIOS bootloader (pureboot.kpxe)..."
     docker run --rm \
         -v "$BUILD_DIR:/build" \
         -v "$INSTALL_DIR/tftp/bios:/out" \
         pureboot/ipxe-builder \
-        "make EMBED=/build/embed.ipxe bin/undionly.kpxe && cp bin/undionly.kpxe /out/pureboot.kpxe"
-
-    if [ -f "$INSTALL_DIR/tftp/bios/pureboot.kpxe" ]; then
-        log_info "Created: tftp/bios/pureboot.kpxe"
-    else
-        log_warn "BIOS bootloader build failed - using stock undionly.kpxe"
-    fi
+        "make EMBED=/build/embed.ipxe bin/undionly.kpxe && cp bin/undionly.kpxe /out/pureboot.kpxe" > /dev/null 2>&1 || true
 
     rm -rf "$BUILD_DIR"
     trap - EXIT
 
-    log_info "Custom bootloader build complete"
+    log_info "Bootloader build complete"
 }
 
 copy_application_files() {
