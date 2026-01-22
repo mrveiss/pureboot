@@ -43,6 +43,8 @@ exit
 
 def generate_discovery_script(mac: str, server: str) -> str:
     """Generate iPXE script for discovered node."""
+    # Create short ID from last 6 chars of MAC (without colons)
+    short_id = mac.replace(":", "")[-6:].upper()
     return f"""#!ipxe
 # PureBoot - Node discovered
 # MAC: {mac}
@@ -53,32 +55,31 @@ echo ========================================
 echo   PureBoot - Node Discovered
 echo ========================================
 echo
-echo   MAC Address: {mac}
-echo   Server: {server}
+echo   Node ID:  {short_id}
+echo   MAC:      {mac}
+echo   IP:       ${{net0/ip}}
+echo   Gateway:  ${{net0/gateway}}
+echo   Server:   {server}
 echo
-echo   This node has been registered with PureBoot.
+echo   Status: Waiting for workflow assignment
 echo   Assign a workflow in the web UI to provision.
 echo
 echo ========================================
 echo
-echo   [W] Wait for workflow (polls every 30s)
-echo   [L] Boot from local disk
-echo   [S] Drop to iPXE shell
-echo   [R] Reboot
-echo
-echo   Auto-polling in 15 seconds...
+echo   Press ESC for iPXE shell
+echo   Auto-polling for workflow in 15 seconds...
 echo
 
 :prompt
-prompt --key 0x1b --timeout 15000 Press ESC for shell, or wait to auto-poll... && goto shell ||
+prompt --key 0x1b --timeout 15000 Waiting... && goto shell ||
 
 :wait
 echo
-echo Checking for workflow assignment...
+echo [${{net0/ip}}] Checking for workflow assignment...
 chain {server}/api/v1/boot?mac={mac} || goto retry
 
 :retry
-echo Server unreachable, retrying in 30 seconds...
+echo [${{net0/ip}}] Server unreachable, retrying in 30 seconds...
 sleep 30
 goto wait
 
@@ -92,16 +93,24 @@ goto start
 
 def generate_pending_script(node: Node, server: str) -> str:
     """Generate iPXE script for node pending installation."""
+    short_id = node.mac_address.replace(":", "")[-6:].upper()
     return f"""#!ipxe
 # PureBoot - Installation pending
 # MAC: {node.mac_address}
 # Workflow: {node.workflow_id or 'none'}
 echo
-echo Node ready for installation.
-echo Workflow: {node.workflow_id or 'Not assigned'}
+echo ========================================
+echo   PureBoot - Pending Installation
+echo ========================================
 echo
-echo Installation will begin on next boot with assigned workflow.
-echo Booting from local disk...
+echo   Node ID:  {short_id}
+echo   MAC:      {node.mac_address}
+echo   IP:       ${{net0/ip}}
+echo   Workflow: {node.workflow_id or 'Not assigned'}
+echo
+echo   Installation will begin on next boot.
+echo   Booting from local disk in 5 seconds...
+echo
 sleep 5
 exit
 """
@@ -111,18 +120,21 @@ def generate_install_script(node: Node, workflow: Workflow, server: str) -> str:
     """Generate iPXE script for OS installation."""
     kernel_url = f"{server}{workflow.kernel_path}"
     initrd_url = f"{server}{workflow.initrd_path}"
+    short_id = node.mac_address.replace(":", "")[-6:].upper()
 
     return f"""#!ipxe
 # PureBoot - Installing {workflow.name}
 # Node: {node.mac_address}
 # Workflow: {workflow.id}
 echo
-echo ======================================
-echo  PureBoot OS Installation
-echo ======================================
+echo ========================================
+echo   PureBoot - OS Installation
+echo ========================================
 echo
-echo Workflow: {workflow.name}
-echo Node MAC: {node.mac_address}
+echo   Node ID:  {short_id}
+echo   MAC:      {node.mac_address}
+echo   IP:       ${{net0/ip}}
+echo   Workflow: {workflow.name}
 echo
 echo Loading kernel...
 kernel {kernel_url} {workflow.cmdline}
@@ -136,14 +148,24 @@ boot
 
 def generate_pending_no_workflow_script(node: Node) -> str:
     """Generate iPXE script for pending node without workflow."""
+    short_id = node.mac_address.replace(":", "")[-6:].upper()
     return f"""#!ipxe
 # PureBoot - Pending (no workflow assigned)
 # Node: {node.mac_address}
 echo
-echo Node is pending but no workflow assigned.
-echo Please assign a workflow in the PureBoot UI.
+echo ========================================
+echo   PureBoot - No Workflow Assigned
+echo ========================================
 echo
-echo Booting from local disk in 10 seconds...
+echo   Node ID:  {short_id}
+echo   MAC:      {node.mac_address}
+echo   IP:       ${{net0/ip}}
+echo
+echo   Node is pending but no workflow assigned.
+echo   Please assign a workflow in the PureBoot UI.
+echo
+echo   Booting from local disk in 10 seconds...
+echo
 sleep 10
 exit
 """
