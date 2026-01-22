@@ -47,7 +47,7 @@ class NodeStateMachine:
         "pending": ["installing"],
         "installing": ["installed", "install_failed"],
         "install_failed": ["pending"],
-        "installed": ["active"],
+        "installed": ["active", "reprovision", "retired"],
         "active": ["reprovision", "deprovisioning", "migrating"],
         "reprovision": ["pending"],
         "deprovisioning": ["retired"],
