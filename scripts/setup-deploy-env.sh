@@ -102,23 +102,35 @@ deploy_image() {
     log "Deploying image: ${url}"
     log "Target: ${PUREBOOT_TARGET}"
 
-    # Detect compression from URL
+    # Detect format and compression from URL
     case "${url}" in
-        *.gz)
-            log "Downloading and decompressing gzip..."
-            wget -q -O - "${url}" | gunzip | dd of="${PUREBOOT_TARGET}" bs=4M
+        # Compressed raw images
+        *.raw.gz|*.img.gz)
+            log "Downloading and decompressing gzip raw image..."
+            wget -q -O - "${url}" | gunzip | dd of="${PUREBOOT_TARGET}" bs=4M status=progress
             ;;
-        *.xz)
-            log "Downloading and decompressing xz..."
-            wget -q -O - "${url}" | xz -d | dd of="${PUREBOOT_TARGET}" bs=4M
+        *.raw.xz|*.img.xz)
+            log "Downloading and decompressing xz raw image..."
+            wget -q -O - "${url}" | xz -d | dd of="${PUREBOOT_TARGET}" bs=4M status=progress
             ;;
-        *.zst)
-            log "Downloading and decompressing zstd..."
-            wget -q -O - "${url}" | zstd -d | dd of="${PUREBOOT_TARGET}" bs=4M
+        *.raw.zst|*.img.zst)
+            log "Downloading and decompressing zstd raw image..."
+            wget -q -O - "${url}" | zstd -d | dd of="${PUREBOOT_TARGET}" bs=4M status=progress
             ;;
-        *)
+        # VM disk formats - these should be pre-converted on server
+        # Use scripts/convert-vm-disk.sh to convert VMDK/VHD/QCOW2 to raw.gz
+        *.qcow2*|*.vmdk*|*.vhd*)
+            error "VM disk formats must be pre-converted to raw. Use convert-vm-disk.sh"
+            ;;
+        # Uncompressed raw
+        *.raw|*.img)
             log "Downloading raw image..."
-            wget -q -O - "${url}" | dd of="${PUREBOOT_TARGET}" bs=4M
+            wget -q -O - "${url}" | dd of="${PUREBOOT_TARGET}" bs=4M status=progress
+            ;;
+        # Default: assume raw
+        *)
+            log "Downloading image (assuming raw format)..."
+            wget -q -O - "${url}" | dd of="${PUREBOOT_TARGET}" bs=4M status=progress
             ;;
     esac
 
