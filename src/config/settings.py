@@ -59,5 +59,8 @@ class Settings(BaseSettings):
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     registration: RegistrationSettings = Field(default_factory=RegistrationSettings)
 
+    # Installation timeout in minutes (0 = disabled)
+    install_timeout_minutes: int = 60
+
 
 settings = Settings()
