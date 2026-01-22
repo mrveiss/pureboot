@@ -15,7 +15,7 @@ interface NodeTableProps {
   enableSelection?: boolean
 }
 
-type SortField = 'hostname' | 'mac_address' | 'state' | 'arch' | 'last_seen_at'
+type SortField = 'hostname' | 'node_id' | 'mac_address' | 'ip_address' | 'state' | 'arch' | 'last_seen_at'
 type SortDirection = 'asc' | 'desc'
 
 function StateBadge({ state }: { state: NodeState }) {
@@ -27,6 +27,11 @@ function StateBadge({ state }: { state: NodeState }) {
       {NODE_STATE_LABELS[state]}
     </Badge>
   )
+}
+
+function getNodeId(mac: string): string {
+  // Short ID from last 6 chars of MAC (without colons), uppercase
+  return mac.replace(/:/g, '').slice(-6).toUpperCase()
 }
 
 function formatLastSeen(dateStr: string | null): string {
@@ -88,9 +93,17 @@ export function NodeTable({
         aVal = a.hostname ?? ''
         bVal = b.hostname ?? ''
         break
+      case 'node_id':
+        aVal = getNodeId(a.mac_address)
+        bVal = getNodeId(b.mac_address)
+        break
       case 'mac_address':
         aVal = a.mac_address
         bVal = b.mac_address
+        break
+      case 'ip_address':
+        aVal = a.ip_address ?? ''
+        bVal = b.ip_address ?? ''
         break
       case 'state':
         aVal = a.state
@@ -213,31 +226,43 @@ export function NodeTable({
             </div>
           )}
           <button
+            className="w-20 p-3 text-left flex items-center gap-1 hover:bg-muted"
+            onClick={() => handleSort('node_id')}
+          >
+            Node ID <SortIcon field="node_id" />
+          </button>
+          <button
             className="flex-1 p-3 text-left flex items-center gap-1 hover:bg-muted"
             onClick={() => handleSort('hostname')}
           >
             Hostname <SortIcon field="hostname" />
           </button>
           <button
-            className="w-40 p-3 text-left flex items-center gap-1 hover:bg-muted"
+            className="w-32 p-3 text-left flex items-center gap-1 hover:bg-muted"
+            onClick={() => handleSort('ip_address')}
+          >
+            IP Address <SortIcon field="ip_address" />
+          </button>
+          <button
+            className="w-36 p-3 text-left flex items-center gap-1 hover:bg-muted"
             onClick={() => handleSort('mac_address')}
           >
             MAC Address <SortIcon field="mac_address" />
           </button>
           <button
-            className="w-32 p-3 text-left flex items-center gap-1 hover:bg-muted"
+            className="w-28 p-3 text-left flex items-center gap-1 hover:bg-muted"
             onClick={() => handleSort('state')}
           >
             State <SortIcon field="state" />
           </button>
           <button
-            className="w-24 p-3 text-left flex items-center gap-1 hover:bg-muted"
+            className="w-20 p-3 text-left flex items-center gap-1 hover:bg-muted"
             onClick={() => handleSort('arch')}
           >
             Arch <SortIcon field="arch" />
           </button>
           <button
-            className="w-28 p-3 text-left flex items-center gap-1 hover:bg-muted"
+            className="w-24 p-3 text-left flex items-center gap-1 hover:bg-muted"
             onClick={() => handleSort('last_seen_at')}
           >
             Last Seen <SortIcon field="last_seen_at" />
@@ -295,19 +320,25 @@ export function NodeTable({
                       to={`/nodes/${node.id}`}
                       className="flex-1 flex items-center"
                     >
+                      <div className="w-20 p-3 text-sm font-mono font-bold text-primary">
+                        {getNodeId(node.mac_address)}
+                      </div>
                       <div className="flex-1 p-3 text-sm font-medium truncate">
                         {node.hostname || (
                           <span className="text-muted-foreground">(undiscovered)</span>
                         )}
                       </div>
-                      <div className="w-40 p-3 text-sm font-mono text-muted-foreground">
+                      <div className="w-32 p-3 text-sm font-mono text-muted-foreground">
+                        {node.ip_address || '-'}
+                      </div>
+                      <div className="w-36 p-3 text-sm font-mono text-muted-foreground">
                         {node.mac_address}
                       </div>
-                      <div className="w-32 p-3">
+                      <div className="w-28 p-3">
                         <StateBadge state={node.state} />
                       </div>
-                      <div className="w-24 p-3 text-sm">{node.arch}</div>
-                      <div className="w-28 p-3 text-sm text-muted-foreground">
+                      <div className="w-20 p-3 text-sm">{node.arch}</div>
+                      <div className="w-24 p-3 text-sm text-muted-foreground">
                         {formatLastSeen(node.last_seen_at)}
                       </div>
                     </Link>
