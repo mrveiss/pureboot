@@ -206,61 +206,40 @@ exit
         # our boot script URL so it re-fetches and continues with the kernel boot
         full_ipxe = f"{server}/tftp/uefi/netboot.xyz.efi"
         boot_script_url = f"{server}/api/v1/boot?mac={node.mac_address}"
+        # Use classic kernel/initrd/boot commands for better UEFI compatibility
         boot_commands = f"""echo Image-based deployment
 echo
 echo   Image:  {image_url}
 echo   Target: {workflow.target_device}
 echo
-
-:trykernel
-imgfree
-echo Fetching kernel from {deploy_kernel}...
-imgfetch --name kernel {deploy_kernel} || goto kerror
-echo Fetching initrd from {deploy_initrd}...
-imgfetch --name initrd {deploy_initrd} || goto ierror
-echo
-echo Loaded images:
-imgstat
-echo
-echo Setting kernel args...
-imgargs kernel {deploy_cmdline} console=ttyS0 console=tty0
+echo Loading kernel from {deploy_kernel}...
+kernel {deploy_kernel} {deploy_cmdline} console=ttyS0 console=tty0 || goto kerror
+echo Loading initrd from {deploy_initrd}...
+initrd {deploy_initrd} || goto ierror
 echo
 echo Starting image deployment...
-imgexec kernel || goto booterror
+boot || goto booterror
 
 :kerror
 echo
-echo *** KERNEL FETCH FAILED ***
+echo *** KERNEL LOAD FAILED ***
+echo Could not load: {deploy_kernel}
 echo Press any key for shell...
 prompt
 shell
 
 :ierror
 echo
-echo *** INITRD FETCH FAILED ***
+echo *** INITRD LOAD FAILED ***
+echo Could not load: {deploy_initrd}
 echo Press any key for shell...
 prompt
 shell
 
 :booterror
 echo
-echo *** bzImage boot failed - need full-featured iPXE ***
-echo
-echo This iPXE lacks bzImage support (common in UEFI environments).
-echo
-echo Chainloading to full iPXE binary...
-echo After chainload, the new iPXE will re-fetch this boot script.
-echo
-chain {full_ipxe} || goto chainerror
-
-:chainerror
-echo
-echo *** CHAINLOAD FAILED ***
-echo Could not load full-featured iPXE from {full_ipxe}
-echo
-echo Manual workaround: Boot from a full-featured iPXE image
-echo and manually chain to: {boot_script_url}
-echo
+echo *** BOOT FAILED ***
+echo Failed to start kernel.
 echo Press any key for shell...
 prompt
 shell
@@ -285,7 +264,7 @@ shell
         # we chainload to netboot.xyz.efi which has full bzImage support
         full_ipxe = f"{server}/tftp/uefi/netboot.xyz.efi"
         boot_script_url = f"{server}/api/v1/boot?mac={node.mac_address}"
-        # Note: For UEFI mode, use console=ttyS0 console=tty0 for visibility
+        # Use classic kernel/initrd/boot commands for better UEFI compatibility
         boot_commands = f"""echo Clone Source Mode
 echo
 echo   This node will serve its disk for cloning
@@ -294,57 +273,34 @@ echo
 echo   Other nodes can clone from this machine.
 echo   Do NOT shut down until cloning is complete.
 echo
-
-:trykernel
-imgfree
+echo Loading kernel from {deploy_kernel}...
+kernel {deploy_kernel} {deploy_cmdline} console=ttyS0 console=tty0 || goto kerror
+echo Loading initrd from {deploy_initrd}...
+initrd {deploy_initrd} || goto ierror
 echo
-echo Fetching kernel from {deploy_kernel}...
-imgfetch --name kernel {deploy_kernel} || goto kerror
-echo Fetching initrd from {deploy_initrd}...
-imgfetch --name initrd {deploy_initrd} || goto ierror
-echo
-echo Loaded images:
-imgstat
-echo
-echo Setting kernel args...
-imgargs kernel {deploy_cmdline} console=ttyS0 console=tty0
-echo
-echo Booting...
-imgexec kernel || goto booterror
+echo Starting clone source...
+boot || goto booterror
 
 :kerror
 echo
-echo *** KERNEL FETCH FAILED ***
+echo *** KERNEL LOAD FAILED ***
+echo Could not load: {deploy_kernel}
 echo Press any key for shell...
 prompt
 shell
 
 :ierror
 echo
-echo *** INITRD FETCH FAILED ***
+echo *** INITRD LOAD FAILED ***
+echo Could not load: {deploy_initrd}
 echo Press any key for shell...
 prompt
 shell
 
 :booterror
 echo
-echo *** bzImage boot failed - need full-featured iPXE ***
-echo
-echo This iPXE lacks bzImage support (common in UEFI environments).
-echo
-echo Chainloading to full iPXE binary...
-echo After chainload, the new iPXE will re-fetch this boot script.
-echo
-chain {full_ipxe} || goto chainerror
-
-:chainerror
-echo
-echo *** CHAINLOAD FAILED ***
-echo Could not load full-featured iPXE from {full_ipxe}
-echo
-echo Manual workaround: Boot from a full-featured iPXE image
-echo and manually chain to: {boot_script_url}
-echo
+echo *** BOOT FAILED ***
+echo Failed to start kernel.
 echo Press any key for shell...
 prompt
 shell
