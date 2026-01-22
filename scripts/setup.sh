@@ -213,6 +213,19 @@ download_bootloaders() {
         log_info "ipxe.efi already exists"
     fi
 
+    # Also download as netboot.xyz.efi for chainload fallback (same file, different name)
+    # This is used when the initial iPXE lacks bzImage support
+    if [ ! -f "$INSTALL_DIR/tftp/uefi/netboot.xyz.efi" ]; then
+        log_info "Downloading netboot.xyz.efi for chainload fallback..."
+        if curl -fsSL "$IPXE_UEFI_URL" -o "$INSTALL_DIR/tftp/uefi/netboot.xyz.efi"; then
+            log_info "Downloaded netboot.xyz.efi"
+        else
+            log_warn "Failed to download netboot.xyz.efi - chainload fallback will not work"
+        fi
+    else
+        log_info "netboot.xyz.efi already exists"
+    fi
+
     # Download iPXE BIOS bootloader
     if [ ! -f "$INSTALL_DIR/tftp/bios/undionly.kpxe" ]; then
         log_info "Downloading undionly.kpxe (BIOS)..."
