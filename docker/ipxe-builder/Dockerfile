@@ -32,8 +32,9 @@ RUN sed -i 's/#undef\tDOWNLOAD_PROTO_HTTPS/#define DOWNLOAD_PROTO_HTTPS/' config
     sed -i 's/\/\/#define CONSOLE_FRAMEBUFFER/#define CONSOLE_FRAMEBUFFER/' config/console.h || true
 
 # CRITICAL: Enable IMAGE_BZIMAGE for EFI builds (it's only in BIOS block by default)
-# Add unconditional define at the end of the image formats section
-RUN sed -i '/^#define IMAGE_EFI/a #define IMAGE_BZIMAGE\t\t/* Linux bzImage (forced for EFI) */' config/general.h
+# Add unconditional define right after IMAGE_EFI (which has leading whitespace)
+RUN sed -i '/#define IMAGE_EFI\s/a #define IMAGE_BZIMAGE\t\t/* Linux bzImage (forced for EFI) */' config/general.h && \
+    grep -n IMAGE_BZIMAGE config/general.h
 
 # Use shell as entrypoint so we can run complex commands
 ENTRYPOINT ["/bin/sh", "-c"]
