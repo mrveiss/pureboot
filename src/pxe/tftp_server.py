@@ -176,6 +176,126 @@ class TFTPHandler:
         return filepath.stat().st_size
 
 
+class TFTPTransfer:
+    """Handles a single TFTP transfer session with proper ACK handling."""
+
+    TIMEOUT = 3.0  # Seconds to wait for ACK
+    MAX_RETRIES = 3
+
+    def __init__(self, handler: TFTPHandler, client_addr: tuple):
+        self.handler = handler
+        self.client_addr = client_addr
+        self.transport = None
+        self.ack_event = asyncio.Event()
+        self.last_ack_block = -1
+        self.done = False
+
+    def connection_made(self, transport):
+        self.transport = transport
+
+    def datagram_received(self, data: bytes, addr: tuple):
+        """Handle incoming packet (should be ACK)."""
+        try:
+            packet = TFTPPacket.parse(data)
+            if packet.opcode == OpCode.ACK:
+                self.last_ack_block = packet.block_num
+                self.ack_event.set()
+            elif packet.opcode == OpCode.ERROR:
+                logger.error(f"Client error: {packet.error_message}")
+                self.done = True
+                self.ack_event.set()
+        except Exception as e:
+            logger.error(f"Error parsing ACK: {e}")
+
+    def error_received(self, exc):
+        logger.error(f"Transfer error: {exc}")
+        self.done = True
+        self.ack_event.set()
+
+    def connection_lost(self, exc):
+        self.done = True
+        self.ack_event.set()
+
+    async def wait_for_ack(self, expected_block: int) -> bool:
+        """Wait for ACK with timeout and retry."""
+        for retry in range(self.MAX_RETRIES):
+            self.ack_event.clear()
+            try:
+                await asyncio.wait_for(self.ack_event.wait(), timeout=self.TIMEOUT)
+                if self.done:
+                    return False
+                if self.last_ack_block == expected_block:
+                    return True
+            except asyncio.TimeoutError:
+                if retry < self.MAX_RETRIES - 1:
+                    logger.debug(f"ACK timeout for block {expected_block}, retry {retry + 1}")
+        return False
+
+    async def send_file(self, filename: str, options: dict) -> bool:
+        """Send file to client with proper ACK handling."""
+        try:
+            blksize = int(options.get("blksize", DEFAULT_BLKSIZE))
+            blksize = min(blksize, MAX_BLKSIZE)
+
+            # Send OACK if options were requested
+            if options:
+                try:
+                    tsize = self.handler.get_file_size(filename)
+                    oack_options = {"blksize": str(blksize), "tsize": str(tsize)}
+                except FileNotFoundError:
+                    oack_options = {"blksize": str(blksize)}
+
+                oack = TFTPPacket.build_oack(oack_options)
+                self.transport.sendto(oack, self.client_addr)
+
+                # Wait for ACK 0
+                if not await self.wait_for_ack(0):
+                    logger.error(f"No ACK for OACK")
+                    return False
+
+            # Send file data
+            block_num = 1
+            chunk = b""
+            async for chunk in self.handler.read_file(filename, blksize):
+                data_packet = TFTPPacket.build_data(block_num, chunk)
+
+                # Send and wait for ACK with retry
+                for retry in range(self.MAX_RETRIES):
+                    self.transport.sendto(data_packet, self.client_addr)
+                    if await self.wait_for_ack(block_num):
+                        break
+                    if retry == self.MAX_RETRIES - 1:
+                        logger.error(f"Transfer failed: no ACK for block {block_num}")
+                        return False
+
+                block_num += 1
+
+            # Send final empty packet if last chunk was full
+            if len(chunk) == blksize:
+                data_packet = TFTPPacket.build_data(block_num, b"")
+                self.transport.sendto(data_packet, self.client_addr)
+                await self.wait_for_ack(block_num)
+
+            logger.info(f"Transfer complete: {filename} ({block_num - 1} blocks)")
+            return True
+
+        except FileNotFoundError:
+            error = TFTPPacket.build_error(ErrorCode.FILE_NOT_FOUND, "File not found")
+            self.transport.sendto(error, self.client_addr)
+            return False
+
+        except PermissionError as e:
+            error = TFTPPacket.build_error(ErrorCode.ACCESS_VIOLATION, str(e))
+            self.transport.sendto(error, self.client_addr)
+            return False
+
+        except Exception as e:
+            logger.error(f"Transfer error: {e}")
+            error = TFTPPacket.build_error(ErrorCode.NOT_DEFINED, str(e))
+            self.transport.sendto(error, self.client_addr)
+            return False
+
+
 class TFTPServerProtocol(asyncio.DatagramProtocol):
     """UDP protocol handler for TFTP server."""
 
@@ -197,15 +317,11 @@ class TFTPServerProtocol(asyncio.DatagramProtocol):
                 logger.info(f"RRQ from {addr}: {packet.filename}")
                 if self.on_request:
                     self.on_request(addr, packet.filename)
-                # Start transfer in background task
+                # Start transfer in background task with dedicated socket
                 task = asyncio.create_task(
                     self._handle_read_request(addr, packet)
                 )
                 self.transfers[addr] = task
-
-            elif packet.opcode == OpCode.ACK:
-                # ACK handled within transfer task
-                pass
 
             elif packet.opcode == OpCode.WRQ:
                 # Write requests not supported
@@ -221,56 +337,26 @@ class TFTPServerProtocol(asyncio.DatagramProtocol):
             self.transport.sendto(error, addr)
 
     async def _handle_read_request(self, client_addr: tuple, packet: TFTPPacket):
-        """Handle a read request."""
+        """Handle a read request using a dedicated socket for the transfer."""
+        transfer = None
+        transport = None
         try:
-            # Parse options
-            blksize = int(packet.options.get("blksize", DEFAULT_BLKSIZE))
-            blksize = min(blksize, MAX_BLKSIZE)
+            # Create dedicated socket for this transfer (TFTP spec requirement)
+            loop = asyncio.get_event_loop()
+            transfer = TFTPTransfer(self.handler, client_addr)
+            transport, _ = await loop.create_datagram_endpoint(
+                lambda: transfer,
+                local_addr=("0.0.0.0", 0)  # Random port
+            )
 
-            # Send OACK if options were requested
-            if packet.options:
-                try:
-                    tsize = self.handler.get_file_size(packet.filename)
-                    oack_options = {"blksize": str(blksize), "tsize": str(tsize)}
-                except FileNotFoundError:
-                    oack_options = {"blksize": str(blksize)}
-
-                oack = TFTPPacket.build_oack(oack_options)
-                self.transport.sendto(oack, client_addr)
-                # Wait for ACK 0
-                await asyncio.sleep(0.1)
-
-            # Send file data
-            block_num = 1
-            chunk = b""
-            async for chunk in self.handler.read_file(packet.filename, blksize):
-                data_packet = TFTPPacket.build_data(block_num, chunk)
-                self.transport.sendto(data_packet, client_addr)
-
-                # Simple flow control - wait a bit between packets
-                # Real implementation would wait for ACK
-                await asyncio.sleep(0.001)
-                block_num += 1
-
-            # Send final empty packet if last chunk was full
-            if len(chunk) == blksize:
-                data_packet = TFTPPacket.build_data(block_num, b"")
-                self.transport.sendto(data_packet, client_addr)
-
-        except FileNotFoundError:
-            error = TFTPPacket.build_error(ErrorCode.FILE_NOT_FOUND, "File not found")
-            self.transport.sendto(error, client_addr)
-
-        except PermissionError as e:
-            error = TFTPPacket.build_error(ErrorCode.ACCESS_VIOLATION, str(e))
-            self.transport.sendto(error, client_addr)
+            await transfer.send_file(packet.filename, packet.options)
 
         except Exception as e:
-            logger.error(f"Transfer error: {e}")
-            error = TFTPPacket.build_error(ErrorCode.NOT_DEFINED, str(e))
-            self.transport.sendto(error, client_addr)
+            logger.error(f"Transfer setup error: {e}")
 
         finally:
+            if transport:
+                transport.close()
             self.transfers.pop(client_addr, None)
 
 
