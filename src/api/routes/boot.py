@@ -222,6 +222,45 @@ echo Press any key to enter iPXE shell.
 sleep 30 || shell
 exit
 """
+    elif workflow.install_method == "clone":
+        # Clone mode: this node serves its disk as source for other nodes
+        # Boots into deploy environment and runs disk server
+        deploy_kernel = f"{server}/tftp/deploy/vmlinuz"
+        deploy_initrd = f"{server}/tftp/deploy/initrd"
+        # Pass clone server parameters via kernel cmdline
+        deploy_cmdline = (
+            f"ip=dhcp "
+            f"pureboot.server={server} "
+            f"pureboot.node_id={node.id} "
+            f"pureboot.mac={node.mac_address} "
+            f"pureboot.mode=clone_source "
+            f"pureboot.source_device={workflow.source_device} "
+            f"pureboot.callback={server}/api/v1/nodes/{node.id}/clone-ready"
+        )
+        boot_commands = f"""echo Clone Source Mode
+echo
+echo   This node will serve its disk for cloning
+echo   Source: {workflow.source_device}
+echo
+echo   Other nodes can clone from this machine.
+echo   Do NOT shut down until cloning is complete.
+echo
+echo Loading deploy kernel...
+kernel {deploy_kernel} {deploy_cmdline} || goto error
+echo Loading deploy initrd...
+initrd {deploy_initrd} || goto error
+echo
+echo Starting clone server...
+boot
+
+:error
+echo
+echo *** BOOT FAILED ***
+echo Failed to load deploy kernel.
+echo Press any key to enter iPXE shell.
+sleep 30 || shell
+exit
+"""
     else:
         # Default: kernel/initrd boot
         kernel_url = f"{server}{workflow.kernel_path}"

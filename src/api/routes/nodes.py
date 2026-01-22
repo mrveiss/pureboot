@@ -595,3 +595,145 @@ async def _handle_legacy_installation_status(
             message = f"Installation failed (attempt {node.install_attempts}), will retry"
 
     return message
+
+
+# Clone-related endpoints
+
+@router.post("/nodes/{node_id}/clone-ready", response_model=ApiResponse)
+async def clone_source_ready(
+    node_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Called by clone source node when it's ready to serve disk."""
+    result = await db.execute(
+        select(Node).options(selectinload(Node.tags)).where(Node.id == node_id)
+    )
+    node = result.scalar_one_or_none()
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    # Parse the request body for clone source info
+    try:
+        body = await request.json()
+        clone_ip = body.get("ip")
+        clone_port = body.get("port", 9999)
+        clone_size = body.get("size")
+        clone_device = body.get("device")
+    except Exception:
+        clone_ip = request.client.host if request.client else None
+        clone_port = 9999
+        clone_size = None
+        clone_device = None
+
+    # Log event
+    await EventService.log_event(
+        db=db,
+        node=node,
+        event_type="clone_source_ready",
+        status="ready",
+        message=f"Clone source ready at {clone_ip}:{clone_port}",
+        metadata={
+            "clone_ip": clone_ip,
+            "clone_port": clone_port,
+            "clone_size": clone_size,
+            "clone_device": clone_device,
+        },
+        ip_address=clone_ip,
+    )
+
+    await db.flush()
+
+    return ApiResponse(
+        success=True,
+        message=f"Clone source registered at {clone_ip}:{clone_port}",
+        data={"clone_url": f"http://{clone_ip}:{clone_port}/cgi-bin/disk.raw.gz"},
+    )
+
+
+@router.post("/nodes/{node_id}/installed", response_model=ApiResponse)
+async def node_installed_callback(
+    node_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Callback when node deployment/clone is complete."""
+    result = await db.execute(
+        select(Node).options(selectinload(Node.tags)).where(Node.id == node_id)
+    )
+    node = result.scalar_one_or_none()
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    # Parse body
+    try:
+        body = await request.json()
+        success = body.get("success", True)
+    except Exception:
+        success = True
+
+    if success and node.state in ("pending", "installing"):
+        await StateTransitionService.transition(
+            db=db,
+            node=node,
+            to_state="installed",
+            triggered_by="deploy_callback",
+        )
+
+        await EventService.log_event(
+            db=db,
+            node=node,
+            event_type="deploy_complete",
+            status="success",
+            message="Image deployment completed",
+            ip_address=request.client.host if request.client else None,
+        )
+
+        await db.flush()
+        await db.refresh(node)
+
+        return ApiResponse(
+            success=True,
+            message="Node marked as installed",
+            data=NodeResponse.from_node(node),
+        )
+
+    return ApiResponse(success=True, message="Callback received")
+
+
+@router.post("/nodes/{node_id}/install-failed", response_model=ApiResponse)
+async def node_install_failed_callback(
+    node_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Callback when node deployment/clone fails."""
+    result = await db.execute(
+        select(Node).options(selectinload(Node.tags)).where(Node.id == node_id)
+    )
+    node = result.scalar_one_or_none()
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    # Parse body for error
+    try:
+        body = await request.json()
+        error = body.get("error", "Unknown error")
+    except Exception:
+        error = "Unknown error"
+
+    if node.state in ("pending", "installing"):
+        await StateTransitionService.handle_install_failure(
+            db=db,
+            node=node,
+            error=error,
+        )
+
+        await db.flush()
+        await db.refresh(node)
+
+    return ApiResponse(
+        success=True,
+        message=f"Install failure recorded: {error}",
+        data=NodeResponse.from_node(node) if node else None,
+    )

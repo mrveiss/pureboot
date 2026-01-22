@@ -26,13 +26,16 @@ class Workflow(BaseModel):
     cmdline: str = ""
     architecture: str = "x86_64"
     boot_mode: str = "bios"
-    # Install method: "kernel" (default), "sanboot" (ISO), "chain" (chainload URL), "image" (disk image)
+    # Install method: "kernel" (default), "sanboot" (ISO), "chain" (chainload URL),
+    # "image" (disk image), "clone" (clone from source node)
     install_method: str = "kernel"
     # For sanboot/chain: the URL to boot from
     boot_url: str = ""
     # For image method: disk image URL and target device
     image_url: str = ""
     target_device: str = "/dev/sda"
+    # For clone method: source device to clone from
+    source_device: str = "/dev/sda"
     # Post-deploy script URL (optional)
     post_script_url: str = ""
 
@@ -187,5 +190,6 @@ class WorkflowService:
             boot_url=boot_url,
             image_url=image_url,
             target_device=workflow.target_device,
+            source_device=workflow.source_device,
             post_script_url=post_script_url,
         )
