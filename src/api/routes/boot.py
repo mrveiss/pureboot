@@ -190,7 +190,9 @@ exit
         deploy_kernel = f"{server}/tftp/deploy/vmlinuz-virt"
         deploy_initrd = f"{server}/tftp/deploy/initramfs-virt"
         # Pass deployment parameters via kernel cmdline
+        # CRITICAL: initrd=initramfs-virt tells UEFI EFI_STUB kernel where to find initrd
         deploy_cmdline = (
+            f"initrd=initramfs-virt "
             f"ip=dhcp "
             f"pureboot.server={server} "
             f"pureboot.node_id={node.id} "
@@ -201,11 +203,6 @@ exit
         )
         if workflow.post_script_url:
             deploy_cmdline += f" pureboot.post_script={workflow.post_script_url}"
-        # For UEFI environments that lack bzImage support (like Hyper-V Gen2),
-        # we chainload to netboot.xyz.efi which has full bzImage support, passing
-        # our boot script URL so it re-fetches and continues with the kernel boot
-        full_ipxe = f"{server}/tftp/uefi/netboot.xyz.efi"
-        boot_script_url = f"{server}/api/v1/boot?mac={node.mac_address}"
         # Use classic kernel/initrd/boot commands for better UEFI compatibility
         boot_commands = f"""echo Image-based deployment
 echo
@@ -251,7 +248,9 @@ shell
         deploy_kernel = f"{server}/tftp/deploy/vmlinuz-virt"
         deploy_initrd = f"{server}/tftp/deploy/initramfs-virt"
         # Pass clone server parameters via kernel cmdline
+        # CRITICAL: initrd=initramfs-virt tells UEFI EFI_STUB kernel where to find initrd
         deploy_cmdline = (
+            f"initrd=initramfs-virt "
             f"ip=dhcp "
             f"pureboot.server={server} "
             f"pureboot.node_id={node.id} "
@@ -260,10 +259,6 @@ shell
             f"pureboot.source_device={workflow.source_device} "
             f"pureboot.callback={server}/api/v1/nodes/{node.id}/clone-ready"
         )
-        # For UEFI environments that lack bzImage support (like Hyper-V Gen2),
-        # we chainload to netboot.xyz.efi which has full bzImage support
-        full_ipxe = f"{server}/tftp/uefi/netboot.xyz.efi"
-        boot_script_url = f"{server}/api/v1/boot?mac={node.mac_address}"
         # Use classic kernel/initrd/boot commands for better UEFI compatibility
         boot_commands = f"""echo Clone Source Mode
 echo
