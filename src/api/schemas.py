@@ -268,6 +268,22 @@ class NodeReport(BaseModel):
     """Node status report from the node itself."""
 
     mac_address: str
+
+    # Event-based reporting (new)
+    event: Literal[
+        "boot_started",
+        "install_started",
+        "install_progress",
+        "install_complete",
+        "install_failed",
+        "first_boot",
+        "heartbeat",
+    ] | None = None
+    status: Literal["success", "failed", "in_progress"] = "success"
+    message: str | None = None
+    event_metadata: dict | None = None
+
+    # Hardware/network info
     ip_address: str | None = None
     hostname: str | None = None
     vendor: str | None = None
@@ -275,7 +291,7 @@ class NodeReport(BaseModel):
     serial_number: str | None = None
     system_uuid: str | None = None
 
-    # Installation reporting
+    # Legacy installation reporting (backwards compatibility)
     installation_status: Literal["started", "progress", "complete", "failed"] | None = None
     installation_progress: int | None = None  # 0-100
     installation_error: str | None = None
@@ -294,6 +310,49 @@ class NodeReport(BaseModel):
         if v is not None and not (0 <= v <= 100):
             raise ValueError("Progress must be between 0 and 100")
         return v
+
+
+class NodeEventResponse(BaseModel):
+    """Response for a single node event."""
+
+    id: str
+    node_id: str
+    event_type: str
+    status: str
+    message: str | None
+    progress: int | None
+    metadata: dict | None
+    ip_address: str | None
+    created_at: datetime
+
+    @classmethod
+    def from_event(cls, event) -> "NodeEventResponse":
+        """Create response from NodeEvent model."""
+        import json
+        metadata = None
+        if event.metadata_json:
+            try:
+                metadata = json.loads(event.metadata_json)
+            except json.JSONDecodeError:
+                pass
+        return cls(
+            id=event.id,
+            node_id=event.node_id,
+            event_type=event.event_type,
+            status=event.status,
+            message=event.message,
+            progress=event.progress,
+            metadata=metadata,
+            ip_address=event.ip_address,
+            created_at=event.created_at,
+        )
+
+
+class NodeEventListResponse(BaseModel):
+    """Response for node events list."""
+
+    data: list[NodeEventResponse]
+    total: int
 
 
 # ============== Generic Response Schemas ==============

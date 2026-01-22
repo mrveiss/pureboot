@@ -87,6 +87,11 @@ class Node(Base):
         back_populates="node", cascade="all, delete-orphan"
     )
 
+    # Event log relationship
+    events: Mapped[list["NodeEvent"]] = relationship(
+        back_populates="node", cascade="all, delete-orphan"
+    )
+
 
 class NodeStateLog(Base):
     """Audit log for node state transitions."""
@@ -111,6 +116,41 @@ class NodeStateLog(Base):
 
     # Relationship
     node: Mapped["Node"] = relationship(back_populates="state_logs")
+
+
+class NodeEvent(Base):
+    """General event log for node lifecycle events."""
+
+    __tablename__ = "node_events"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    # Event type: boot_started, install_started, install_progress, install_complete,
+    #             install_failed, first_boot, heartbeat
+    event_type: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+
+    # Status: success, failed, in_progress
+    status: Mapped[str] = mapped_column(String(20), default="success")
+
+    # Optional message and progress
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    progress: Mapped[int | None] = mapped_column(nullable=True)  # 0-100
+
+    # Metadata (OS version, kernel, etc.)
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Client info
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    # Relationship
+    node: Mapped["Node"] = relationship(back_populates="events")
 
 
 class NodeTag(Base):

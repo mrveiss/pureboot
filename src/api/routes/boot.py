@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
+from src.core.state_service import StateTransitionService
 from src.core.workflow_service import Workflow, WorkflowNotFoundError, WorkflowService
 from src.db.database import get_db
 from src.db.models import Node
@@ -115,17 +116,40 @@ exit
 """
 
 
-def generate_workflow_error_script(node: Node, workflow_id: str) -> str:
-    """Generate iPXE script for workflow not found error."""
+def generate_workflow_error_script(node: Node, error_message: str) -> str:
+    """Generate iPXE script for workflow/installation error."""
     return f"""#!ipxe
-# PureBoot - Workflow Error
-# Node: {node.mac_address}
+# PureBoot - Installation Error
+# MAC: {node.mac_address}
+# Error: {error_message}
 echo
-echo ERROR: Workflow '{workflow_id}' not found.
-echo Please verify workflow exists or assign a different one.
+echo *** ERROR ***
+echo
+echo Node: {node.mac_address}
+echo Error: {error_message}
+echo
+echo Manual intervention may be required.
+echo
+echo Booting from local disk in 30 seconds...
+echo Press any key to enter iPXE shell.
+sleep 30 || shell
+exit
+"""
+
+
+def generate_install_retry_script(node: Node, server: str) -> str:
+    """Generate iPXE script for install retry (still has retries left)."""
+    return f"""#!ipxe
+# PureBoot - Installation Retry
+# MAC: {node.mac_address}
+# Attempt: {node.install_attempts}
+echo
+echo Previous installation attempt timed out.
+echo Retrying installation (attempt {node.install_attempts})...
 echo
 echo Booting from local disk...
-sleep 10
+echo Installation will restart on next provisioning cycle.
+sleep 5
 exit
 """
 
@@ -225,9 +249,28 @@ async def get_boot_script(
                 )
                 return generate_install_script(node, workflow, server)
             except (WorkflowNotFoundError, ValueError):
-                return generate_workflow_error_script(node, node.workflow_id)
+                return generate_workflow_error_script(node, f"Workflow '{node.workflow_id}' not found")
         case "installing":
-            # Let installation continue, boot local
+            # Check for installation timeout
+            if settings.install_timeout_minutes > 0 and node.state_changed_at:
+                elapsed = datetime.now(timezone.utc) - node.state_changed_at
+                timeout_seconds = settings.install_timeout_minutes * 60
+                if elapsed.total_seconds() > timeout_seconds:
+                    # Installation timed out - handle as failure
+                    await StateTransitionService.handle_install_failure(
+                        db=db,
+                        node=node,
+                        error=f"Installation timed out after {settings.install_timeout_minutes} minutes",
+                    )
+                    await db.flush()
+                    # Return appropriate script based on new state
+                    if node.state == "install_failed":
+                        return generate_workflow_error_script(
+                            node, f"Timeout after {settings.install_timeout_minutes}m"
+                        )
+                    # Still has retries - return retry script (boot local to restart)
+                    return generate_install_retry_script(node, server)
+            # Normal installing state - boot local
             return generate_local_boot_script()
         case "installed" | "active" | "retired":
             return generate_local_boot_script()
