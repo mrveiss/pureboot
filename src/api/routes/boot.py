@@ -186,9 +186,9 @@ exit
         image_url = workflow.image_url
         if not image_url:
             return generate_workflow_error_script(node, "image method requires image_url")
-        # Use PureBoot's deploy kernel/initrd
-        deploy_kernel = f"{server}/tftp/deploy/vmlinuz"
-        deploy_initrd = f"{server}/tftp/deploy/initrd"
+        # Use PureBoot's deploy kernel/initrd (virt for UEFI compatibility)
+        deploy_kernel = f"{server}/tftp/deploy/vmlinuz-virt"
+        deploy_initrd = f"{server}/tftp/deploy/initramfs-virt"
         # Pass deployment parameters via kernel cmdline
         deploy_cmdline = (
             f"ip=dhcp "
@@ -207,32 +207,38 @@ echo   Image:  {image_url}
 echo   Target: {workflow.target_device}
 echo
 imgfree
-echo Loading deploy kernel...
-kernel {deploy_kernel} {deploy_cmdline} && goto loadinitrd || goto kerror
-
-:loadinitrd
-echo Kernel loaded OK
-echo Loading deploy initrd...
-initrd {deploy_initrd} && goto doboot || goto ierror
-
-:doboot
-echo Initrd loaded OK
+echo
+echo Fetching kernel from {deploy_kernel}...
+imgfetch --name kernel {deploy_kernel} || goto kerror
+echo Fetching initrd from {deploy_initrd}...
+imgfetch --name initrd {deploy_initrd} || goto ierror
+echo
+echo Loaded images:
+imgstat
+echo
+echo Setting kernel args...
+imgargs kernel {deploy_cmdline} console=ttyS0 console=tty0
 echo
 echo Starting image deployment...
-boot
+imgexec kernel || goto booterror
 
 :kerror
 echo
-echo *** KERNEL LOAD FAILED ***
-echo URL: {deploy_kernel}
+echo *** KERNEL FETCH FAILED ***
 echo Press any key for shell...
 prompt
 shell
 
 :ierror
 echo
-echo *** INITRD LOAD FAILED ***
-echo URL: {deploy_initrd}
+echo *** INITRD FETCH FAILED ***
+echo Press any key for shell...
+prompt
+shell
+
+:booterror
+echo
+echo *** BOOT FAILED - iPXE may not support bzImage in UEFI mode ***
 echo Press any key for shell...
 prompt
 shell
@@ -240,8 +246,9 @@ shell
     elif workflow.install_method == "clone":
         # Clone mode: this node serves its disk as source for other nodes
         # Boots into deploy environment and runs disk server
-        deploy_kernel = f"{server}/tftp/deploy/vmlinuz"
-        deploy_initrd = f"{server}/tftp/deploy/initrd"
+        # Use virt kernel for better UEFI/Hyper-V compatibility
+        deploy_kernel = f"{server}/tftp/deploy/vmlinuz-virt"
+        deploy_initrd = f"{server}/tftp/deploy/initramfs-virt"
         # Pass clone server parameters via kernel cmdline
         deploy_cmdline = (
             f"ip=dhcp "
@@ -252,6 +259,7 @@ shell
             f"pureboot.source_device={workflow.source_device} "
             f"pureboot.callback={server}/api/v1/nodes/{node.id}/clone-ready"
         )
+        # Note: For UEFI mode, use console=ttyS0 console=tty0 for visibility
         boot_commands = f"""echo Clone Source Mode
 echo
 echo   This node will serve its disk for cloning
@@ -261,32 +269,46 @@ echo   Other nodes can clone from this machine.
 echo   Do NOT shut down until cloning is complete.
 echo
 imgfree
-echo Loading deploy kernel...
-kernel {deploy_kernel} {deploy_cmdline} && goto loadinitrd || goto kerror
-
-:loadinitrd
-echo Kernel loaded OK
-echo Loading deploy initrd...
-initrd {deploy_initrd} && goto doboot || goto ierror
-
-:doboot
-echo Initrd loaded OK
 echo
-echo Starting clone server...
-boot
+echo Checking iPXE image support...
+imgstat || echo No images loaded
+echo
+echo Fetching kernel from {deploy_kernel}...
+imgfetch --name kernel {deploy_kernel} || goto kerror
+echo Fetching initrd from {deploy_initrd}...
+imgfetch --name initrd {deploy_initrd} || goto ierror
+echo
+echo Loaded images:
+imgstat
+echo
+echo Setting kernel args...
+imgargs kernel {deploy_cmdline} console=ttyS0 console=tty0
+echo
+echo Booting...
+imgexec kernel || goto booterror
 
 :kerror
 echo
-echo *** KERNEL LOAD FAILED ***
-echo URL: {deploy_kernel}
+echo *** KERNEL FETCH FAILED ***
 echo Press any key for shell...
 prompt
 shell
 
 :ierror
 echo
-echo *** INITRD LOAD FAILED ***
-echo URL: {deploy_initrd}
+echo *** INITRD FETCH FAILED ***
+echo Press any key for shell...
+prompt
+shell
+
+:booterror
+echo
+echo *** BOOT FAILED ***
+echo The iPXE may not support Linux bzImage in UEFI mode
+echo
+echo Try chainloading to a custom iPXE with IMAGE_BZIMAGE enabled
+echo Or boot via BIOS mode instead of UEFI
+echo
 echo Press any key for shell...
 prompt
 shell

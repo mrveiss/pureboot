@@ -23,11 +23,14 @@ WORKDIR /ipxe/src
 # - Console commands for resolution
 # - Color commands for branded display
 # - Framebuffer for graphics
+# - BZIMAGE for Linux kernel loading (critical for UEFI)
+# - EFI for UEFI boot support
 RUN sed -i 's/#undef\tDOWNLOAD_PROTO_HTTPS/#define DOWNLOAD_PROTO_HTTPS/' config/general.h && \
     sed -i 's/\/\/#define IMAGE_PNG/#define IMAGE_PNG/' config/general.h && \
     sed -i 's/\/\/#define CONSOLE_CMD/#define CONSOLE_CMD/' config/general.h && \
     sed -i 's/\/\/#define COLOUR_CMD/#define COLOUR_CMD/' config/general.h && \
     sed -i 's/\/\/#define CPAIR_CMD/#define CPAIR_CMD/' config/general.h && \
+    sed -i 's/\/\/#define IMAGE_BZIMAGE/#define IMAGE_BZIMAGE/' config/general.h && \
     sed -i 's/\/\/#define CONSOLE_FRAMEBUFFER/#define CONSOLE_FRAMEBUFFER/' config/console.h || true
 
 # Use shell as entrypoint so we can run complex commands
