@@ -193,6 +193,7 @@ async def transition_node_state(
             force=transition.force,
         )
         await db.flush()
+        await db.refresh(node)
         await db.refresh(node, ["tags"])
 
         return ApiResponse(
