@@ -160,6 +160,7 @@ async def update_node(
         setattr(node, field, value)
 
     await db.flush()
+    await db.refresh(node)
     await db.refresh(node, ["tags"])
 
     return ApiResponse(
