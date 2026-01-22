@@ -10,6 +10,8 @@ from src.api.schemas import (
     ApiListResponse,
     ApiResponse,
     NodeCreate,
+    NodeEventListResponse,
+    NodeEventResponse,
     NodeHistoryResponse,
     NodeReport,
     NodeResponse,
@@ -377,6 +379,44 @@ async def report_node_status(
     return ApiResponse(
         data=NodeResponse.from_node(node),
         message=message,
+    )
+
+
+@router.get("/nodes/{node_id}/events", response_model=NodeEventListResponse)
+async def get_node_events(
+    node_id: str,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    event_type: str | None = Query(None, description="Filter by event type"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get events for a specific node."""
+    # Verify node exists
+    result = await db.execute(select(Node).where(Node.id == node_id))
+    node = result.scalar_one_or_none()
+    if not node:
+        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
+
+    # Build query
+    query = select(NodeEvent).where(NodeEvent.node_id == node_id)
+    if event_type:
+        query = query.where(NodeEvent.event_type == event_type)
+    query = query.order_by(NodeEvent.created_at.desc())
+
+    # Get total count
+    count_result = await db.execute(
+        select(func.count()).select_from(query.subquery())
+    )
+    total = count_result.scalar() or 0
+
+    # Get paginated results
+    query = query.offset(offset).limit(limit)
+    result = await db.execute(query)
+    events = result.scalars().all()
+
+    return NodeEventListResponse(
+        data=[NodeEventResponse.from_event(e) for e in events],
+        total=total,
     )
 
 
