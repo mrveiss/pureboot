@@ -206,21 +206,36 @@ echo
 echo   Image:  {image_url}
 echo   Target: {workflow.target_device}
 echo
+imgfree
 echo Loading deploy kernel...
-kernel {deploy_kernel} {deploy_cmdline} || goto error
+kernel {deploy_kernel} {deploy_cmdline} && goto loadinitrd || goto kerror
+
+:loadinitrd
+echo Kernel loaded OK
 echo Loading deploy initrd...
-initrd {deploy_initrd} || goto error
+initrd {deploy_initrd} && goto doboot || goto ierror
+
+:doboot
+echo Initrd loaded OK
 echo
 echo Starting image deployment...
 boot
 
-:error
+:kerror
 echo
-echo *** BOOT FAILED ***
-echo Failed to load deploy kernel.
-echo Press any key to enter iPXE shell.
-sleep 30 || shell
-exit
+echo *** KERNEL LOAD FAILED ***
+echo URL: {deploy_kernel}
+echo Press any key for shell...
+prompt
+shell
+
+:ierror
+echo
+echo *** INITRD LOAD FAILED ***
+echo URL: {deploy_initrd}
+echo Press any key for shell...
+prompt
+shell
 """
     elif workflow.install_method == "clone":
         # Clone mode: this node serves its disk as source for other nodes
@@ -245,21 +260,36 @@ echo
 echo   Other nodes can clone from this machine.
 echo   Do NOT shut down until cloning is complete.
 echo
+imgfree
 echo Loading deploy kernel...
-kernel {deploy_kernel} {deploy_cmdline} || goto error
+kernel {deploy_kernel} {deploy_cmdline} && goto loadinitrd || goto kerror
+
+:loadinitrd
+echo Kernel loaded OK
 echo Loading deploy initrd...
-initrd {deploy_initrd} || goto error
+initrd {deploy_initrd} && goto doboot || goto ierror
+
+:doboot
+echo Initrd loaded OK
 echo
 echo Starting clone server...
 boot
 
-:error
+:kerror
 echo
-echo *** BOOT FAILED ***
-echo Failed to load deploy kernel.
-echo Press any key to enter iPXE shell.
-sleep 30 || shell
-exit
+echo *** KERNEL LOAD FAILED ***
+echo URL: {deploy_kernel}
+echo Press any key for shell...
+prompt
+shell
+
+:ierror
+echo
+echo *** INITRD LOAD FAILED ***
+echo URL: {deploy_initrd}
+echo Press any key for shell...
+prompt
+shell
 """
     else:
         # Default: kernel/initrd boot
