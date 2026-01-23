@@ -22,6 +22,7 @@ from src.api.routes.user_groups import router as user_groups_router
 from src.api.routes.service_accounts import router as service_accounts_router
 from src.api.routes.roles import router as roles_router
 from src.api.routes.approval_rules import router as approval_rules_router
+from src.api.routes.audit import router as audit_router
 from src.api.middleware.auth import AuthMiddleware
 from src.db.database import init_db, close_db, async_session_factory
 from src.config import settings
@@ -291,6 +292,10 @@ app = FastAPI(
             "name": "approval-rules",
             "description": "Approval rules for configuring approval policies",
         },
+        {
+            "name": "audit",
+            "description": "Audit logs for security event tracking",
+        },
     ],
 )
 
@@ -319,6 +324,7 @@ app.include_router(user_groups_router, prefix="/api/v1", tags=["user-groups"])
 app.include_router(service_accounts_router, prefix="/api/v1", tags=["service-accounts"])
 app.include_router(roles_router, prefix="/api/v1", tags=["roles"])
 app.include_router(approval_rules_router, prefix="/api/v1", tags=["approval-rules"])
+app.include_router(audit_router, prefix="/api/v1", tags=["audit"])
 
 # Static assets directory
 assets_dir = Path("assets")
