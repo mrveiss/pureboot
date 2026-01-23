@@ -392,6 +392,14 @@ class Approval(Base):
     )  # bulk_wipe, bulk_retire, delete_template, etc.
     action_data_json: Mapped[str] = mapped_column(Text, nullable=False)  # JSON
 
+    # Link to approval rule that triggered this request
+    rule_id: Mapped[str | None] = mapped_column(
+        ForeignKey("approval_rules.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Operation type for policy matching (e.g., "node.provision", "workflow.execute")
+    operation_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+
     # Requester info (no auth yet, so just names/IPs)
     requester_id: Mapped[str | None] = mapped_column(String(100))
     requester_name: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -402,14 +410,22 @@ class Approval(Base):
     )  # pending, approved, rejected, expired, cancelled
     required_approvers: Mapped[int] = mapped_column(default=2)
 
+    # Escalation tracking
+    escalated_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    escalation_count: Mapped[int] = mapped_column(default=0)
+
     # Expiration
     expires_at: Mapped[datetime] = mapped_column(nullable=False)
     resolved_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    # Additional context about the request
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(default=func.now())
 
     # Relationships
+    rule: Mapped["ApprovalRule | None"] = relationship(back_populates="approvals")
     votes: Mapped[list["ApprovalVote"]] = relationship(
         back_populates="approval", cascade="all, delete-orphan"
     )
@@ -434,6 +450,9 @@ class ApprovalVote(Base):
     # Vote
     vote: Mapped[str] = mapped_column(String(10), nullable=False)  # approve, reject
     comment: Mapped[str | None] = mapped_column(Text)
+
+    # Whether this vote came from escalation (e.g., escalation role member)
+    is_escalation_vote: Mapped[bool] = mapped_column(default=False)
 
     # Timestamp
     created_at: Mapped[datetime] = mapped_column(default=func.now())
@@ -707,6 +726,7 @@ class ApprovalRule(Base):
     escalation_role: Mapped["Role | None"] = relationship(
         back_populates="escalation_rules"
     )
+    approvals: Mapped[list["Approval"]] = relationship(back_populates="rule")
 
 
 class RefreshToken(Base):
