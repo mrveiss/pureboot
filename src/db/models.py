@@ -520,6 +520,9 @@ class Role(Base):
     user_groups: Mapped[list["UserGroup"]] = relationship(
         secondary="user_group_roles", back_populates="roles"
     )
+    escalation_rules: Mapped[list["ApprovalRule"]] = relationship(
+        back_populates="escalation_role"
+    )
 
 
 class Permission(Base):
@@ -667,6 +670,42 @@ class UserGroupNode(Base):
     )
     node_id: Mapped[str] = mapped_column(
         ForeignKey("nodes.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class ApprovalRule(Base):
+    """Configurable approval rule for operations requiring multi-party approval."""
+
+    __tablename__ = "approval_rules"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    scope_type: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # device_group, user_group, global
+    scope_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True
+    )  # null for global scope
+    operations_json: Mapped[str] = mapped_column(
+        Text, nullable=False
+    )  # JSON array of operation types
+    required_approvers: Mapped[int] = mapped_column(default=1)
+    escalation_timeout_hours: Mapped[int] = mapped_column(default=72)
+    escalation_role_id: Mapped[str | None] = mapped_column(
+        ForeignKey("roles.id", ondelete="SET NULL"), nullable=True
+    )
+    is_active: Mapped[bool] = mapped_column(default=True)
+    priority: Mapped[int] = mapped_column(default=0)  # Higher priority rules evaluated first
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        default=func.now(), onupdate=func.now()
+    )
+
+    # Relationships
+    escalation_role: Mapped["Role | None"] = relationship(
+        back_populates="escalation_rules"
     )
 
 
