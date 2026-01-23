@@ -8,6 +8,7 @@ export * from './activity'
 export * from './approval'
 export * from './hypervisor'
 export * from './rbac'
+export * from './audit'
 
 export type {
   StorageBackendType,
