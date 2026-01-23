@@ -1089,3 +1089,260 @@ class WorkflowListResponse(BaseModel):
 
     data: list[WorkflowResponse]
     total: int
+
+
+# ============== Clone Session Schemas ==============
+
+
+class CloneSessionCreate(BaseModel):
+    """Schema for creating a clone session."""
+
+    name: str | None = Field(None, max_length=255, description="Optional session name")
+    source_node_id: str = Field(..., description="Source node ID")
+    target_node_id: str | None = Field(None, description="Target node ID (can be set later)")
+    source_device: str = Field("/dev/sda", description="Source disk device")
+    target_device: str = Field("/dev/sda", description="Target disk device")
+    clone_mode: Literal["staged", "direct"] = Field("staged", description="Clone mode")
+    staging_backend_id: str | None = Field(
+        None, description="Storage backend for staged mode"
+    )
+    resize_mode: Literal["none", "shrink_source", "grow_target"] = Field(
+        "none", description="Partition resize strategy"
+    )
+
+    @model_validator(mode="after")
+    def validate_staged_requires_backend(self) -> "CloneSessionCreate":
+        if self.clone_mode == "staged" and not self.staging_backend_id:
+            raise ValueError("staging_backend_id required for staged mode")
+        if self.clone_mode == "direct" and not self.target_node_id:
+            raise ValueError("target_node_id required for direct mode")
+        return self
+
+
+class CloneSessionUpdate(BaseModel):
+    """Schema for updating a clone session."""
+
+    name: str | None = None
+    target_node_id: str | None = None
+    target_device: str | None = None
+    resize_mode: Literal["none", "shrink_source", "grow_target"] | None = None
+
+
+class CloneSessionResponse(BaseModel):
+    """Response schema for clone session."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str | None
+    status: str
+    clone_mode: str
+    source_node_id: str
+    source_node_name: str | None = None
+    target_node_id: str | None
+    target_node_name: str | None = None
+    source_device: str
+    target_device: str
+    source_ip: str | None
+    source_port: int
+    staging_backend_id: str | None
+    staging_backend_name: str | None = None
+    staging_path: str | None
+    staging_status: str | None
+    resize_mode: str
+    bytes_total: int | None
+    bytes_transferred: int
+    transfer_rate_bps: int | None
+    progress_percent: float = 0.0
+    error_message: str | None
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+    created_by: str | None
+
+    @classmethod
+    def from_session(cls, session) -> "CloneSessionResponse":
+        """Create response from CloneSession model."""
+        progress = 0.0
+        if session.bytes_total and session.bytes_total > 0:
+            progress = (session.bytes_transferred / session.bytes_total) * 100
+
+        return cls(
+            id=session.id,
+            name=session.name,
+            status=session.status,
+            clone_mode=session.clone_mode,
+            source_node_id=session.source_node_id,
+            source_node_name=session.source_node.hostname if session.source_node else None,
+            target_node_id=session.target_node_id,
+            target_node_name=session.target_node.hostname if session.target_node else None,
+            source_device=session.source_device,
+            target_device=session.target_device,
+            source_ip=session.source_ip,
+            source_port=session.source_port,
+            staging_backend_id=session.staging_backend_id,
+            staging_backend_name=session.staging_backend.name if session.staging_backend else None,
+            staging_path=session.staging_path,
+            staging_status=session.staging_status,
+            resize_mode=session.resize_mode,
+            bytes_total=session.bytes_total,
+            bytes_transferred=session.bytes_transferred,
+            transfer_rate_bps=session.transfer_rate_bps,
+            progress_percent=round(progress, 1),
+            error_message=session.error_message,
+            created_at=session.created_at,
+            started_at=session.started_at,
+            completed_at=session.completed_at,
+            created_by=session.created_by,
+        )
+
+
+class CloneProgressUpdate(BaseModel):
+    """Progress update from clone source or target."""
+
+    role: Literal["source", "target"]
+    bytes_transferred: int = Field(..., ge=0)
+    transfer_rate_bps: int | None = Field(None, ge=0)
+    status: Literal["transferring", "verifying", "resizing"] | None = None
+
+
+class CloneSourceReady(BaseModel):
+    """Notification that clone source is ready."""
+
+    ip: str
+    port: int = 9999
+    size_bytes: int
+    device: str
+
+
+class CloneCertBundle(BaseModel):
+    """Certificate bundle for clone session participant."""
+
+    cert_pem: str
+    key_pem: str
+    ca_pem: str
+
+
+# ============== Disk and Partition Schemas ==============
+
+
+class PartitionInfo(BaseModel):
+    """Information about a single partition."""
+
+    number: int
+    start_bytes: int
+    end_bytes: int
+    size_bytes: int
+    size_human: str = ""
+    type: str  # efi, linux, swap, ntfs, etc.
+    filesystem: str | None = None
+    label: str | None = None
+    flags: list[str] = []
+    used_bytes: int | None = None
+    used_percent: float | None = None
+    can_shrink: bool = False
+    min_size_bytes: int | None = None
+
+
+class DiskInfoResponse(BaseModel):
+    """Response schema for disk information."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    node_id: str
+    device: str
+    size_bytes: int
+    size_human: str = ""
+    model: str | None
+    serial: str | None
+    partition_table: str | None
+    partitions: list[PartitionInfo] = []
+    scanned_at: datetime
+
+    @classmethod
+    def from_disk_info(cls, disk_info) -> "DiskInfoResponse":
+        """Create response from DiskInfo model."""
+        partitions = []
+        if disk_info.partitions_json:
+            try:
+                partitions = [PartitionInfo(**p) for p in json.loads(disk_info.partitions_json)]
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Human readable size
+        size_gb = disk_info.size_bytes / (1024 ** 3)
+        if size_gb >= 1000:
+            size_human = f"{size_gb / 1024:.1f} TB"
+        else:
+            size_human = f"{size_gb:.1f} GB"
+
+        return cls(
+            id=disk_info.id,
+            node_id=disk_info.node_id,
+            device=disk_info.device,
+            size_bytes=disk_info.size_bytes,
+            size_human=size_human,
+            model=disk_info.model,
+            serial=disk_info.serial,
+            partition_table=disk_info.partition_table,
+            partitions=partitions,
+            scanned_at=disk_info.scanned_at,
+        )
+
+
+class PartitionOperationCreate(BaseModel):
+    """Schema for creating a partition operation."""
+
+    operation: Literal["resize", "create", "delete", "format", "move", "set_flag"]
+    params: dict = Field(..., description="Operation-specific parameters")
+
+    @field_validator("params")
+    @classmethod
+    def validate_params(cls, v: dict, info) -> dict:
+        """Validate params based on operation type."""
+        # Basic validation - more specific validation happens in the service
+        if not v:
+            raise ValueError("params cannot be empty")
+        return v
+
+
+class PartitionOperationResponse(BaseModel):
+    """Response schema for partition operation."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    node_id: str
+    session_id: str | None
+    device: str
+    operation: str
+    params: dict
+    sequence: int
+    status: str
+    error_message: str | None
+    created_at: datetime
+    executed_at: datetime | None
+
+    @classmethod
+    def from_operation(cls, op) -> "PartitionOperationResponse":
+        """Create response from PartitionOperation model."""
+        params = {}
+        try:
+            params = json.loads(op.params_json)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        return cls(
+            id=op.id,
+            node_id=op.node_id,
+            session_id=op.session_id,
+            device=op.device,
+            operation=op.operation,
+            params=params,
+            sequence=op.sequence,
+            status=op.status,
+            error_message=op.error_message,
+            created_at=op.created_at,
+            executed_at=op.executed_at,
+        )
