@@ -18,6 +18,8 @@ from src.api.routes.auth import router as auth_router
 from src.api.routes.users import router as users_router
 from src.api.routes.ws import router as ws_router
 from src.api.routes.hypervisors import router as hypervisors_router
+from src.api.routes.clone import router as clone_router
+from src.core.ca import ca_service
 from src.db.database import init_db, close_db, async_session_factory
 from src.config import settings
 from src.pxe.tftp_server import TFTPServer
@@ -94,6 +96,10 @@ async def lifespan(app: FastAPI):
     sync_scheduler.start()
     await _register_scheduled_jobs()
     logger.info("Scheduler started")
+
+    # Initialize CA service
+    ca_service.initialize()
+    logger.info("CA service initialized")
 
     logger.info(f"PureBoot ready on http://{settings.host}:{settings.port}")
 
@@ -262,6 +268,10 @@ app = FastAPI(
             "name": "websocket",
             "description": "WebSocket endpoint for real-time updates",
         },
+        {
+            "name": "clone-sessions",
+            "description": "Disk cloning session management - create and monitor clone operations",
+        },
     ],
 )
 
@@ -283,6 +293,7 @@ app.include_router(auth_router, prefix="/api/v1", tags=["auth"])
 app.include_router(users_router, prefix="/api/v1", tags=["users"])
 app.include_router(ws_router, prefix="/api/v1", tags=["websocket"])
 app.include_router(hypervisors_router, prefix="/api/v1", tags=["hypervisors"])
+app.include_router(clone_router, prefix="/api/v1", tags=["clone-sessions"])
 
 # Static assets directory
 assets_dir = Path("assets")
