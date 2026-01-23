@@ -284,7 +284,10 @@ async def get_clone_certs(
         key_pem = session.target_key_pem
 
     if not cert_pem or not key_pem:
-        raise HTTPException(status_code=404, detail=f"Certificates not found for {role}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Certificates not yet generated for {role}. Start the session first.",
+        )
 
     return ApiResponse(
         data=CloneCertBundle(
