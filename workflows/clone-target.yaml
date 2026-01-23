@@ -1,8 +1,12 @@
-# Clone Target Workflow
+# Clone Target Workflow (LEGACY)
 # Receives disk image from a clone source node
+#
+# DEPRECATION NOTICE: This workflow is deprecated in favor of clone-target-direct.yaml
+# which provides peer-to-peer TLS-secured cloning. This legacy workflow will be
+# removed in a future release.
 id: clone-target
-name: Clone Target (Receive Disk)
-description: Boot into deploy environment to receive disk clone from source node
+name: Clone Target (Receive Disk) [LEGACY]
+description: "[DEPRECATED - Use clone-target-direct] Boot into deploy environment to receive disk clone from source node"
 
 # Install method: image - will stream disk from source and write to target
 install_method: image

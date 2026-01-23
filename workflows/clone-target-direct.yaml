@@ -1,0 +1,17 @@
+# Direct Clone Target Workflow
+# Boots into deploy environment to receive disk via HTTPS
+id: clone-target-direct
+name: Clone Target (Direct P2P)
+description: Boot into deploy environment to receive peer-to-peer disk clone
+
+# Install method: deploy - boots minimal environment for cloning
+install_method: deploy
+
+# Boot into clone target mode
+boot_params:
+  pureboot.mode: clone_target_direct
+  # session_id, device, target_ip, target_port set dynamically by controller
+
+# Architecture and boot mode
+architecture: x86_64
+boot_mode: uefi
