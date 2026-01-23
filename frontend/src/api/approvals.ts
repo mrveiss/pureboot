@@ -6,6 +6,7 @@ import type {
   ApprovalStatsResponse,
   ApprovalApiResponse,
   VoteCreate,
+  VoteResult,
 } from '../types/approval'
 
 export interface ApprovalFilters {
@@ -63,5 +64,18 @@ export const approvalsApi = {
       `/approvals/${id}?requester_name=${encodeURIComponent(requester_name)}`
     )
     return response.data!
+  },
+
+  vote: async (approvalId: string, data: VoteCreate): Promise<VoteResult> => {
+    return apiClient.post<VoteResult>(`/approvals/${approvalId}/vote`, data)
+  },
+
+  cancelById: async (approvalId: string): Promise<void> => {
+    await apiClient.post(`/approvals/${approvalId}/cancel`)
+  },
+
+  listMyPending: async (): Promise<Approval[]> => {
+    const response = await apiClient.get<ApprovalListResponse>('/approvals?my_pending=true')
+    return response.data
   },
 }
