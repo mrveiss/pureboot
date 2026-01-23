@@ -17,6 +17,7 @@ import {
   Bot,
   Shield,
   Scale,
+  FileText,
 } from 'lucide-react'
 
 interface NavItemProps {
@@ -89,6 +90,7 @@ export function Sidebar({ pendingApprovals = 0 }: SidebarProps) {
         <NavItem to="/service-accounts" icon={<Bot className="h-4 w-4" />} label="Service Accounts" />
         <NavItem to="/roles" icon={<Shield className="h-4 w-4" />} label="Roles" />
         <NavItem to="/approval-rules" icon={<Scale className="h-4 w-4" />} label="Approval Rules" />
+        <NavItem to="/audit-logs" icon={<FileText className="h-4 w-4" />} label="Audit Logs" />
       </nav>
     </aside>
   )
