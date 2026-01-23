@@ -417,7 +417,7 @@ export function LdapConfig() {
                 <Switch
                   id="use_ssl"
                   checked={formData.use_ssl}
-                  onCheckedChange={(checked) =>
+                  onCheckedChange={(checked: boolean) =>
                     setFormData({ ...formData, use_ssl: checked, use_start_tls: checked ? false : formData.use_start_tls })
                   }
                 />
@@ -427,7 +427,7 @@ export function LdapConfig() {
                 <Switch
                   id="use_start_tls"
                   checked={formData.use_start_tls}
-                  onCheckedChange={(checked) =>
+                  onCheckedChange={(checked: boolean) =>
                     setFormData({ ...formData, use_start_tls: checked, use_ssl: checked ? false : formData.use_ssl })
                   }
                 />
@@ -559,7 +559,7 @@ export function LdapConfig() {
                 <Switch
                   id="is_active"
                   checked={formData.is_active}
-                  onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
+                  onCheckedChange={(checked: boolean) => setFormData({ ...formData, is_active: checked })}
                 />
               </div>
 
@@ -571,7 +571,7 @@ export function LdapConfig() {
                 <Switch
                   id="is_primary"
                   checked={formData.is_primary}
-                  onCheckedChange={(checked) => setFormData({ ...formData, is_primary: checked })}
+                  onCheckedChange={(checked: boolean) => setFormData({ ...formData, is_primary: checked })}
                 />
               </div>
 
@@ -583,7 +583,7 @@ export function LdapConfig() {
                 <Switch
                   id="sync_groups"
                   checked={formData.sync_groups}
-                  onCheckedChange={(checked) => setFormData({ ...formData, sync_groups: checked })}
+                  onCheckedChange={(checked: boolean) => setFormData({ ...formData, sync_groups: checked })}
                 />
               </div>
 
@@ -595,7 +595,7 @@ export function LdapConfig() {
                 <Switch
                   id="auto_create_users"
                   checked={formData.auto_create_users}
-                  onCheckedChange={(checked) => setFormData({ ...formData, auto_create_users: checked })}
+                  onCheckedChange={(checked: boolean) => setFormData({ ...formData, auto_create_users: checked })}
                 />
               </div>
             </div>

@@ -168,12 +168,11 @@ function VoteHistory({ votes }: VoteHistoryProps) {
 interface ApprovalCardProps {
   approval: Approval
   currentUserId: string
-  currentUsername: string
   onVote: (approvalId: string, vote: 'approve' | 'reject') => void
   onCancel: (approvalId: string) => void
 }
 
-function ApprovalCard({ approval, currentUserId, currentUsername, onVote, onCancel }: ApprovalCardProps) {
+function ApprovalCard({ approval, currentUserId, onVote, onCancel }: ApprovalCardProps) {
   const [showDetails, setShowDetails] = useState(false)
 
   const isPending = approval.status === 'pending'
@@ -402,7 +401,6 @@ export default function Approvals() {
   // Get current user from auth store
   const user = useAuthStore((state) => state.user)
   const currentUserId = user?.id || ''
-  const currentUsername = user?.username || ''
 
   // Queries
   const myPendingQuery = useMyPendingApprovals()
@@ -547,7 +545,6 @@ export default function Approvals() {
               key={approval.id}
               approval={approval}
               currentUserId={currentUserId}
-              currentUsername={currentUsername}
               onVote={handleOpenVoteDialog}
               onCancel={handleCancel}
             />

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { auditApi } from '@/api'
-import type { AuditLog, AuditFilters, AuditLogListResponse } from '@/types'
+import type { AuditFilters, AuditLogListResponse } from '@/types'
 import { AUDIT_RESULT_COLORS, AUDIT_ACTOR_TYPE_LABELS } from '@/types/audit'
 import {
   Card,

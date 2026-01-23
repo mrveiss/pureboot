@@ -1,6 +1,6 @@
 import type { NodeState } from './node'
 
-export interface ApprovalRule {
+export interface BulkApprovalRule {
   action: BulkActionType
   required: boolean
   min_approvers: number
