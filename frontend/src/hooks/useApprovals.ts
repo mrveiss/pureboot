@@ -6,6 +6,7 @@ export const approvalKeys = {
   all: ['approvals'] as const,
   lists: () => [...approvalKeys.all, 'list'] as const,
   list: (filters?: ApprovalFilters) => [...approvalKeys.lists(), filters] as const,
+  myPending: () => [...approvalKeys.all, 'myPending'] as const,
   history: () => [...approvalKeys.all, 'history'] as const,
   stats: () => [...approvalKeys.all, 'stats'] as const,
   details: () => [...approvalKeys.all, 'detail'] as const,
@@ -24,6 +25,13 @@ export function useApprovals(filters?: ApprovalFilters) {
   return useQuery({
     queryKey: approvalKeys.list(filters),
     queryFn: () => approvalsApi.list(filters),
+  })
+}
+
+export function useMyPendingApprovals() {
+  return useQuery({
+    queryKey: approvalKeys.myPending(),
+    queryFn: () => approvalsApi.listMyPending(),
   })
 }
 
@@ -83,6 +91,29 @@ export function useCancelApproval() {
   return useMutation({
     mutationFn: ({ id, requester_name }: { id: string; requester_name: string }) =>
       approvalsApi.cancel(id, requester_name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: approvalKeys.all })
+    },
+  })
+}
+
+export function useVote() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ approvalId, data }: { approvalId: string; data: VoteCreate }) =>
+      approvalsApi.vote(approvalId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: approvalKeys.all })
+    },
+  })
+}
+
+export function useCancelApprovalById() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (approvalId: string) => approvalsApi.cancelById(approvalId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: approvalKeys.all })
     },
