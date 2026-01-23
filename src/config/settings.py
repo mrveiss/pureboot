@@ -47,6 +47,14 @@ class RegistrationSettings(BaseSettings):
     default_group_id: str | None = None  # Default group for new nodes
 
 
+class AuditSettings(BaseSettings):
+    """Audit logging configuration."""
+    file_enabled: bool = False
+    file_path: str = "/var/log/pureboot/audit.log"
+    siem_enabled: bool = False
+    siem_webhook_url: str | None = None
+
+
 class Settings(BaseSettings):
     """Main application settings."""
     model_config = SettingsConfigDict(
@@ -66,6 +74,7 @@ class Settings(BaseSettings):
     boot_menu: BootMenuSettings = Field(default_factory=BootMenuSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     registration: RegistrationSettings = Field(default_factory=RegistrationSettings)
+    audit: AuditSettings = Field(default_factory=AuditSettings)
 
     # Installation timeout in minutes (0 = disabled)
     install_timeout_minutes: int = 60

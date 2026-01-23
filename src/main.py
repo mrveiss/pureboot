@@ -29,6 +29,7 @@ from src.pxe.tftp_server import TFTPServer
 from src.pxe.dhcp_proxy import DHCPProxy
 from src.core.scheduler import sync_scheduler
 from src.core.escalation_job import process_escalations
+from src.services.audit import audit_service
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -51,6 +52,14 @@ async def lifespan(app: FastAPI):
     # Initialize database
     await init_db()
     logger.info("Database initialized")
+
+    # Configure audit service
+    if settings.audit.file_enabled:
+        audit_service.configure(file_path=settings.audit.file_path)
+        logger.info(f"Audit file logging enabled: {settings.audit.file_path}")
+    if settings.audit.siem_enabled and settings.audit.siem_webhook_url:
+        audit_service.configure(siem_webhook_url=settings.audit.siem_webhook_url)
+        logger.info("Audit SIEM webhook enabled")
 
     # Ensure TFTP root exists
     tftp_root = Path(settings.tftp.root)
