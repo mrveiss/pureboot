@@ -44,6 +44,9 @@ PERMISSIONS = [
     # Audit permissions
     ("audit", "read", "View audit logs"),
     ("audit", "export", "Export audit logs"),
+    # LDAP permissions
+    ("ldap", "read", "View LDAP configurations"),
+    ("ldap", "write", "Manage LDAP configurations"),
 ]
 
 # Define roles and their permissions
