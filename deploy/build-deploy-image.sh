@@ -323,6 +323,15 @@ chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-common.sh"
 chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-clone-source-direct.sh"
 chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-clone-target-direct.sh"
 
+# Copy partition scripts
+echo "Copying partition scripts..."
+cp "${SCRIPT_DIR}/scripts/pureboot-disk-scan.sh" "${ROOTFS_DIR}/usr/local/bin/"
+cp "${SCRIPT_DIR}/scripts/pureboot-partition-ops.sh" "${ROOTFS_DIR}/usr/local/bin/"
+cp "${SCRIPT_DIR}/scripts/pureboot-partition.sh" "${ROOTFS_DIR}/usr/local/bin/"
+chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-disk-scan.sh"
+chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-partition-ops.sh"
+chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-partition.sh"
+
 # Create init script
 cat > "${ROOTFS_DIR}/init" << 'INIT_EOF'
 #!/bin/sh
