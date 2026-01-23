@@ -7,11 +7,10 @@ import { apiClient } from '@/api/client'
 interface AuthStore {
   user: User | null
   accessToken: string | null
-  refreshToken: string | null
   isAuthenticated: boolean
   isLoading: boolean
 
-  login: (email: string, password: string) => Promise<void>
+  login: (username: string, password: string) => Promise<void>
   logout: () => Promise<void>
   refreshTokens: () => Promise<void>
   setTokens: (tokens: AuthTokens) => void
@@ -24,17 +23,15 @@ export const useAuthStore = create<AuthStore>()(
     (set, get) => ({
       user: null,
       accessToken: null,
-      refreshToken: null,
       isAuthenticated: false,
       isLoading: false,
 
-      login: async (email: string, password: string) => {
+      login: async (username: string, password: string) => {
         set({ isLoading: true })
         try {
-          const tokens = await authApi.login({ email, password })
+          const tokens = await authApi.login({ username, password })
           set({
             accessToken: tokens.access_token,
-            refreshToken: tokens.refresh_token,
             isAuthenticated: true,
           })
           await get().fetchUser()
@@ -53,16 +50,11 @@ export const useAuthStore = create<AuthStore>()(
       },
 
       refreshTokens: async () => {
-        const { refreshToken } = get()
-        if (!refreshToken) {
-          get().clearAuth()
-          return
-        }
         try {
-          const tokens = await authApi.refresh(refreshToken)
+          // Refresh token is in httpOnly cookie, no need to pass it
+          const tokens = await authApi.refresh()
           set({
             accessToken: tokens.access_token,
-            refreshToken: tokens.refresh_token,
           })
         } catch {
           get().clearAuth()
@@ -73,7 +65,6 @@ export const useAuthStore = create<AuthStore>()(
         apiClient.setAccessToken(tokens.access_token)
         set({
           accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token,
           isAuthenticated: true,
         })
       },
@@ -83,15 +74,14 @@ export const useAuthStore = create<AuthStore>()(
         set({
           user: null,
           accessToken: null,
-          refreshToken: null,
           isAuthenticated: false,
         })
       },
 
       fetchUser: async () => {
         try {
-          const response = await authApi.me()
-          set({ user: response.data })
+          const user = await authApi.me()
+          set({ user })
         } catch {
           get().clearAuth()
         }
@@ -101,7 +91,6 @@ export const useAuthStore = create<AuthStore>()(
       name: 'pureboot-auth',
       partialize: (state) => ({
         accessToken: state.accessToken,
-        refreshToken: state.refreshToken,
       }),
       onRehydrateStorage: () => (state) => {
         if (state?.accessToken) {

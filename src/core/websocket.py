@@ -1,10 +1,60 @@
 """WebSocket connection manager for real-time updates."""
+import asyncio
 import logging
-from typing import Dict, Set
+from typing import Dict, Set, List, Any
 
 from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
+
+
+class GlobalWebSocketManager:
+    """Manages WebSocket connections for global real-time updates."""
+
+    def __init__(self):
+        self.connections: Set[WebSocket] = set()
+        self._lock = asyncio.Lock()
+
+    async def connect(self, websocket: WebSocket) -> None:
+        """Accept connection and add to global broadcast list."""
+        await websocket.accept()
+        async with self._lock:
+            self.connections.add(websocket)
+        logger.info(f"Global WebSocket connected. Total: {len(self.connections)}")
+
+    async def disconnect(self, websocket: WebSocket) -> None:
+        """Remove connection on disconnect."""
+        async with self._lock:
+            self.connections.discard(websocket)
+        logger.info(f"Global WebSocket disconnected. Total: {len(self.connections)}")
+
+    async def broadcast(self, event_type: str, data: Any) -> None:
+        """Broadcast event to all connected clients."""
+        if not self.connections:
+            return
+
+        message = {"type": event_type, "data": data}
+        dead_connections: List[WebSocket] = []
+
+        async with self._lock:
+            for ws in self.connections:
+                try:
+                    await ws.send_json(message)
+                except Exception as e:
+                    logger.warning(f"Failed to send WebSocket message: {e}")
+                    dead_connections.append(ws)
+
+            for ws in dead_connections:
+                self.connections.discard(ws)
+
+    @property
+    def connection_count(self) -> int:
+        """Get number of active connections."""
+        return len(self.connections)
+
+
+# Global instance for application-wide events
+global_ws_manager = GlobalWebSocketManager()
 
 
 class SyncWebSocketManager:
@@ -51,5 +101,5 @@ class SyncWebSocketManager:
         return len(self.connections.get(job_id, set()))
 
 
-# Global instance
+# Global instance for sync jobs
 ws_manager = SyncWebSocketManager()

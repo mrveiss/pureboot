@@ -47,7 +47,7 @@ export function Header({ notificationCount = 0 }: HeaderProps) {
             <User className="h-4 w-4" />
           </div>
           <div className="hidden flex-col sm:flex">
-            <span className="text-sm font-medium">{user?.name || 'User'}</span>
+            <span className="text-sm font-medium">{user?.username || 'User'}</span>
             <span className="text-xs text-muted-foreground">{user?.role || 'Unknown'}</span>
           </div>
           <Button variant="ghost" size="icon" onClick={() => logout()} aria-label="Logout">

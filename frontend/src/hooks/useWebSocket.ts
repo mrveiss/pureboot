@@ -5,9 +5,10 @@ export type WebSocketEvent =
   | { type: 'node.created'; data: { id: string; mac_address: string } }
   | { type: 'node.state_changed'; data: { id: string; old_state: string; new_state: string } }
   | { type: 'node.updated'; data: { id: string } }
-  | { type: 'approval.requested'; data: { id: string; action: string; target: string } }
+  | { type: 'install.progress'; data: { node_id: string; progress: number } }
+  | { type: 'approval.requested'; data: { id: string; action_type: string } }
   | { type: 'approval.resolved'; data: { id: string; status: 'approved' | 'rejected' } }
-  | { type: 'wipe.progress'; data: { node_id: string; progress: number } }
+  | { type: 'pong' }
 
 type EventHandler = (event: WebSocketEvent) => void
 
@@ -18,6 +19,8 @@ interface UseWebSocketOptions {
   onError?: (error: Event) => void
   reconnectInterval?: number
   maxReconnectAttempts?: number
+  /** Connect even without authentication (for anonymous access) */
+  allowAnonymous?: boolean
 }
 
 interface UseWebSocketReturn {
@@ -34,6 +37,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
     onError,
     reconnectInterval = 3000,
     maxReconnectAttempts = 10,
+    allowAnonymous = true, // Allow anonymous connections by default
   } = options
 
   const { accessToken, isAuthenticated } = useAuthStore()
@@ -43,10 +47,16 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const connect = useCallback(() => {
-    if (!isAuthenticated || !accessToken) return
+    // Only require auth if allowAnonymous is false
+    if (!allowAnonymous && (!isAuthenticated || !accessToken)) return
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/api/v1/ws?token=${accessToken}`
+    let wsUrl = `${protocol}//${window.location.host}/api/v1/ws`
+
+    // Add token if available
+    if (accessToken) {
+      wsUrl += `?token=${accessToken}`
+    }
 
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
@@ -82,7 +92,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
         console.error('Failed to parse WebSocket message:', event.data)
       }
     }
-  }, [isAuthenticated, accessToken, onConnect, onDisconnect, onError, onMessage, reconnectInterval, maxReconnectAttempts])
+  }, [isAuthenticated, accessToken, allowAnonymous, onConnect, onDisconnect, onError, onMessage, reconnectInterval, maxReconnectAttempts])
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {

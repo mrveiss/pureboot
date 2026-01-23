@@ -6,7 +6,7 @@ import { useAuthStore } from '@/stores'
 export function Login() {
   const navigate = useNavigate()
   const { login, isLoading } = useAuthStore()
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
 
@@ -15,7 +15,7 @@ export function Login() {
     setError('')
 
     try {
-      await login(email, password)
+      await login(username, password)
       navigate('/')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed')
@@ -43,13 +43,13 @@ export function Login() {
             )}
 
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="username">Username</Label>
               <Input
-                id="email"
-                type="email"
-                placeholder="admin@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="username"
+                type="text"
+                placeholder="admin"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
                 required
               />
             </div>
