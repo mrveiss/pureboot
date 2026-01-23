@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import ForeignKey, Index, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -727,6 +727,49 @@ class ApprovalRule(Base):
         back_populates="escalation_rules"
     )
     approvals: Mapped[list["Approval"]] = relationship(back_populates="rule")
+
+
+class AuditLog(Base):
+    """Immutable audit trail for security-relevant events."""
+
+    __tablename__ = "audit_logs"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+
+    # When
+    timestamp: Mapped[datetime] = mapped_column(
+        default=func.now(), index=True, nullable=False
+    )
+
+    # Who
+    actor_id: Mapped[str | None] = mapped_column(String(36), nullable=True)  # User or service account ID
+    actor_type: Mapped[str] = mapped_column(String(20), nullable=False)  # user, service_account, system
+    actor_username: Mapped[str] = mapped_column(String(100), nullable=False)
+    actor_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)  # IPv4 or IPv6
+
+    # What
+    action: Mapped[str] = mapped_column(String(50), index=True, nullable=False)  # login, logout, create, update, delete, approve, reject, etc.
+    resource_type: Mapped[str] = mapped_column(String(50), index=True, nullable=False)  # node, user, role, approval, etc.
+    resource_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    resource_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+    # Details
+    details_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON with action-specific details
+
+    # Result
+    result: Mapped[str] = mapped_column(String(20), nullable=False)  # success, failure, denied
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    # Session tracking
+    session_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    auth_method: Mapped[str | None] = mapped_column(String(20), nullable=True)  # jwt, api_key, ldap
+
+    __table_args__ = (
+        Index('ix_audit_timestamp_action', 'timestamp', 'action'),
+        Index('ix_audit_actor_resource', 'actor_id', 'resource_type'),
+    )
 
 
 class RefreshToken(Base):
