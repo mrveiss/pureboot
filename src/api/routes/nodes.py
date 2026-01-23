@@ -2,7 +2,7 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -10,6 +10,14 @@ from src.config import settings
 from src.api.schemas import (
     ApiListResponse,
     ApiResponse,
+    BulkAddTagRequest,
+    BulkAssignGroupRequest,
+    BulkAssignWorkflowRequest,
+    BulkChangeStateError,
+    BulkChangeStateRequest,
+    BulkChangeStateResult,
+    BulkOperationResult,
+    BulkRemoveTagRequest,
     NodeCreate,
     NodeEventListResponse,
     NodeEventResponse,
@@ -17,6 +25,7 @@ from src.api.schemas import (
     NodeReport,
     NodeResponse,
     NodeStateLogResponse,
+    NodeStatsResponse,
     NodeUpdate,
     StateTransition,
     TagCreate,
@@ -25,7 +34,7 @@ from src.core.event_service import EventService
 from src.core.state_machine import InvalidStateTransition, NodeStateMachine
 from src.core.state_service import StateTransitionService
 from src.db.database import get_db
-from src.db.models import Node, NodeEvent, NodeStateLog, NodeTag
+from src.db.models import DeviceGroup, Node, NodeEvent, NodeStateLog, NodeTag
 
 router = APIRouter()
 
@@ -53,6 +62,203 @@ async def list_nodes(
     return ApiListResponse(
         data=[NodeResponse.from_node(n) for n in nodes],
         total=len(nodes),
+    )
+
+
+@router.get("/nodes/stats", response_model=ApiResponse[NodeStatsResponse])
+async def get_node_stats(
+    db: AsyncSession = Depends(get_db),
+):
+    """Get aggregated node statistics.
+
+    Returns total count, count by state, and recent discovery stats.
+    Optimized for dashboard display.
+    """
+    # Total count
+    total_result = await db.execute(select(func.count()).select_from(Node))
+    total = total_result.scalar() or 0
+
+    # Count by state
+    state_counts_result = await db.execute(
+        select(Node.state, func.count()).group_by(Node.state)
+    )
+    by_state = dict(state_counts_result.all())
+
+    # Discovered in last hour
+    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    discovered_result = await db.execute(
+        select(func.count())
+        .select_from(Node)
+        .where(Node.state == "discovered")
+        .where(Node.created_at >= one_hour_ago)
+    )
+    discovered_last_hour = discovered_result.scalar() or 0
+
+    return ApiResponse(
+        data=NodeStatsResponse(
+            total=total,
+            by_state=by_state,
+            discovered_last_hour=discovered_last_hour,
+            installing_count=by_state.get("installing", 0),
+        )
+    )
+
+
+# ============== Bulk Operations ==============
+
+
+@router.post("/nodes/bulk/assign-group", response_model=ApiResponse[BulkOperationResult])
+async def bulk_assign_group(
+    request: BulkAssignGroupRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Assign multiple nodes to a device group."""
+    # Validate group exists if provided
+    if request.group_id:
+        group_result = await db.execute(
+            select(DeviceGroup).where(DeviceGroup.id == request.group_id)
+        )
+        if not group_result.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Group not found")
+
+    # Update nodes
+    result = await db.execute(
+        update(Node)
+        .where(Node.id.in_(request.node_ids))
+        .values(group_id=request.group_id)
+    )
+
+    updated = result.rowcount
+
+    action = "assigned to group" if request.group_id else "unassigned from group"
+    return ApiResponse(
+        data=BulkOperationResult(updated=updated),
+        message=f"{updated} node(s) {action}",
+    )
+
+
+@router.post("/nodes/bulk/assign-workflow", response_model=ApiResponse[BulkOperationResult])
+async def bulk_assign_workflow(
+    request: BulkAssignWorkflowRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Assign multiple nodes to a workflow."""
+    # Update nodes
+    result = await db.execute(
+        update(Node)
+        .where(Node.id.in_(request.node_ids))
+        .values(workflow_id=request.workflow_id)
+    )
+
+    updated = result.rowcount
+
+    action = "assigned workflow" if request.workflow_id else "unassigned workflow"
+    return ApiResponse(
+        data=BulkOperationResult(updated=updated),
+        message=f"{updated} node(s) {action}",
+    )
+
+
+@router.post("/nodes/bulk/add-tag", response_model=ApiResponse[BulkOperationResult])
+async def bulk_add_tag(
+    request: BulkAddTagRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a tag to multiple nodes."""
+    tag_lower = request.tag  # Already normalized by validator
+
+    # Get existing tags to avoid duplicates
+    existing = await db.execute(
+        select(NodeTag.node_id)
+        .where(NodeTag.node_id.in_(request.node_ids))
+        .where(NodeTag.tag == tag_lower)
+    )
+    existing_node_ids = {row[0] for row in existing.all()}
+
+    # Verify which nodes exist
+    nodes_result = await db.execute(
+        select(Node.id).where(Node.id.in_(request.node_ids))
+    )
+    valid_node_ids = {row[0] for row in nodes_result.all()}
+
+    # Add tags only to nodes that don't have it and exist
+    nodes_to_tag = valid_node_ids - existing_node_ids
+
+    for node_id in nodes_to_tag:
+        db.add(NodeTag(node_id=node_id, tag=tag_lower))
+
+    await db.flush()
+
+    return ApiResponse(
+        data=BulkOperationResult(updated=len(nodes_to_tag)),
+        message=f"Added tag '{tag_lower}' to {len(nodes_to_tag)} node(s)",
+    )
+
+
+@router.post("/nodes/bulk/remove-tag", response_model=ApiResponse[BulkOperationResult])
+async def bulk_remove_tag(
+    request: BulkRemoveTagRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a tag from multiple nodes."""
+    tag_lower = request.tag  # Already normalized by validator
+
+    # Delete matching tags
+    result = await db.execute(
+        delete(NodeTag)
+        .where(NodeTag.node_id.in_(request.node_ids))
+        .where(NodeTag.tag == tag_lower)
+    )
+
+    deleted = result.rowcount
+
+    return ApiResponse(
+        data=BulkOperationResult(updated=deleted),
+        message=f"Removed tag '{tag_lower}' from {deleted} node(s)",
+    )
+
+
+@router.post("/nodes/bulk/change-state", response_model=ApiResponse[BulkChangeStateResult])
+async def bulk_change_state(
+    request: BulkChangeStateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Change state for multiple nodes with individual validation."""
+    # Get all nodes
+    result = await db.execute(
+        select(Node)
+        .options(selectinload(Node.tags))
+        .where(Node.id.in_(request.node_ids))
+    )
+    nodes = result.scalars().all()
+
+    updated = 0
+    errors: list[BulkChangeStateError] = []
+
+    for node in nodes:
+        try:
+            await StateTransitionService.transition(
+                db=db,
+                node=node,
+                to_state=request.new_state,
+                triggered_by="bulk_operation",
+            )
+            updated += 1
+        except (InvalidStateTransition, ValueError) as e:
+            errors.append(BulkChangeStateError(
+                node_id=node.id,
+                error=str(e),
+            ))
+
+    await db.flush()
+
+    return ApiResponse(
+        data=BulkChangeStateResult(
+            updated=updated,
+            failed=len(errors),
+            errors=errors,
+        ),
+        message=f"Changed state for {updated} node(s), {len(errors)} failed",
     )
 
 

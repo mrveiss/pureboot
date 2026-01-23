@@ -31,30 +31,8 @@ export function useNodeStats() {
   return useQuery({
     queryKey: nodeKeys.stats(),
     queryFn: async (): Promise<NodeStats> => {
-      // This will call a stats endpoint when available
-      // For now, compute from list
-      const response = await nodesApi.list({ limit: 1000 })
-      const nodes = response.data
-
-      const by_state = {} as Record<NodeState, number>
-      const states: NodeState[] = [
-        'discovered', 'ignored', 'pending', 'installing', 'installed',
-        'active', 'reprovision', 'migrating', 'retired', 'decommissioned', 'wiping'
-      ]
-      states.forEach(s => by_state[s] = 0)
-      nodes.forEach(n => by_state[n.state]++)
-
-      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
-      const discovered_last_hour = nodes.filter(
-        n => n.state === 'discovered' && n.created_at > oneHourAgo
-      ).length
-
-      return {
-        total: nodes.length,
-        by_state,
-        discovered_last_hour,
-        installing_count: by_state.installing,
-      }
+      const response = await nodesApi.stats()
+      return response.data
     },
     staleTime: 30000, // 30 seconds
   })

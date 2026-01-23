@@ -4,10 +4,15 @@ import type {
   ApiListResponse,
   Node,
   DeviceGroup,
-  NodeFilterParams
+  NodeFilterParams,
+  NodeStats
 } from '@/types'
 
 export const nodesApi = {
+  async stats(): Promise<ApiResponse<NodeStats>> {
+    return apiClient.get<ApiResponse<NodeStats>>('/nodes/stats')
+  },
+
   async list(params?: NodeFilterParams): Promise<ApiListResponse<Node>> {
     const queryParams: Record<string, string> = {}
     if (params?.state) queryParams.state = params.state

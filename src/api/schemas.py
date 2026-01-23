@@ -872,6 +872,106 @@ class SyncProgress(BaseModel):
     error: str | None
 
 
+# ============== Node Stats Schemas ==============
+
+
+class NodeStatsResponse(BaseModel):
+    """Aggregated node statistics."""
+
+    total: int
+    by_state: dict[str, int]
+    discovered_last_hour: int
+    installing_count: int
+
+
+# ============== Bulk Operation Schemas ==============
+
+
+class BulkAssignGroupRequest(BaseModel):
+    """Request to assign multiple nodes to a group."""
+
+    node_ids: list[str]
+    group_id: str | None = None
+
+
+class BulkAssignWorkflowRequest(BaseModel):
+    """Request to assign multiple nodes to a workflow."""
+
+    node_ids: list[str]
+    workflow_id: str | None = None
+
+
+class BulkAddTagRequest(BaseModel):
+    """Request to add a tag to multiple nodes."""
+
+    node_ids: list[str]
+    tag: str
+
+    @field_validator("tag")
+    @classmethod
+    def validate_tag(cls, v: str) -> str:
+        """Validate and normalize tag."""
+        v = v.strip().lower()
+        if not v or len(v) > 50:
+            raise ValueError("Tag must be 1-50 characters")
+        if not re.match(r"^[a-zA-Z0-9_-]+$", v):
+            raise ValueError("Tag can only contain letters, numbers, hyphens, underscores")
+        return v
+
+
+class BulkRemoveTagRequest(BaseModel):
+    """Request to remove a tag from multiple nodes."""
+
+    node_ids: list[str]
+    tag: str
+
+    @field_validator("tag")
+    @classmethod
+    def validate_tag(cls, v: str) -> str:
+        """Normalize tag."""
+        return v.strip().lower()
+
+
+class BulkChangeStateRequest(BaseModel):
+    """Request to change state for multiple nodes."""
+
+    node_ids: list[str]
+    new_state: str
+
+    @field_validator("new_state")
+    @classmethod
+    def validate_state(cls, v: str) -> str:
+        """Validate state is a known state."""
+        from src.core.state_machine import NodeStateMachine
+
+        if v not in NodeStateMachine.STATES:
+            raise ValueError(
+                f"Invalid state: {v}. Must be one of {NodeStateMachine.STATES}"
+            )
+        return v
+
+
+class BulkOperationResult(BaseModel):
+    """Result of a bulk operation."""
+
+    updated: int
+
+
+class BulkChangeStateError(BaseModel):
+    """Error for a single node in bulk state change."""
+
+    node_id: str
+    error: str
+
+
+class BulkChangeStateResult(BaseModel):
+    """Result of bulk state change operation."""
+
+    updated: int
+    failed: int
+    errors: list[BulkChangeStateError] = []
+
+
 # ============== Workflow Schemas ==============
 
 
