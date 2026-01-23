@@ -333,3 +333,39 @@ class SyncJobRun(Base):
 
     # Relationships
     job: Mapped[SyncJob] = relationship(back_populates="runs")
+
+
+class Template(Base):
+    """Template for OS installation (ISO, kickstart, preseed, etc.)."""
+
+    __tablename__ = "templates"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    type: Mapped[str] = mapped_column(
+        String(20), nullable=False, index=True
+    )  # iso, kickstart, preseed, autounattend, cloud-init, script
+    os_family: Mapped[str | None] = mapped_column(String(20))  # linux, windows, bsd
+    os_name: Mapped[str | None] = mapped_column(String(50))  # ubuntu, debian, rhel, windows
+    os_version: Mapped[str | None] = mapped_column(String(20))  # 24.04, 9, 2022
+    architecture: Mapped[str] = mapped_column(String(10), default="x86_64")  # x86_64, aarch64
+
+    # File storage
+    file_path: Mapped[str | None] = mapped_column(String(500))
+    storage_backend_id: Mapped[str | None] = mapped_column(
+        ForeignKey("storage_backends.id"), nullable=True
+    )
+    storage_backend: Mapped["StorageBackend | None"] = relationship()
+    size_bytes: Mapped[int | None] = mapped_column(nullable=True)
+    checksum: Mapped[str | None] = mapped_column(String(64))  # SHA256
+
+    # Metadata
+    description: Mapped[str | None] = mapped_column(Text)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        default=func.now(), onupdate=func.now()
+    )

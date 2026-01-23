@@ -3,6 +3,7 @@ export * from './auth'
 export * from './api'
 export * from './group'
 export * from './workflow'
+export * from './template'
 
 export type {
   StorageBackendType,

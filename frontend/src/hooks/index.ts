@@ -32,6 +32,14 @@ export {
   useWorkflow,
 } from './useWorkflows'
 export {
+  templateKeys,
+  useTemplates,
+  useTemplate,
+  useCreateTemplate,
+  useUpdateTemplate,
+  useDeleteTemplate,
+} from './useTemplates'
+export {
   storageKeys,
   useStorageBackends,
   useStorageBackend,
