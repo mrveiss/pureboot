@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.database import async_session_factory, init_db
-from src.db.models import Role, Permission, RolePermission, User
+from src.db.models import Role, Permission, RolePermission, User, UserGroup, UserGroupRole
 from src.api.routes.auth import hash_password
 
 
@@ -157,6 +157,66 @@ async def seed_roles(db: AsyncSession, perm_map: dict[tuple[str, str], Permissio
     return role_map
 
 
+# Define default user groups
+USER_GROUPS = {
+    "Administrators": {
+        "description": "Full system administrators",
+        "requires_approval": False,
+        "roles": ["admin"],
+    },
+    "Operators": {
+        "description": "Node operators and workflow managers",
+        "requires_approval": False,
+        "roles": ["operator"],
+    },
+    "Viewers": {
+        "description": "Read-only access for monitoring",
+        "requires_approval": False,
+        "roles": ["viewer"],
+    },
+    "Auditors": {
+        "description": "Audit and compliance team",
+        "requires_approval": False,
+        "roles": ["auditor"],
+    },
+}
+
+
+async def seed_user_groups(db: AsyncSession, role_map: dict[str, Role]) -> dict[str, UserGroup]:
+    """Create default user groups if they don't exist."""
+    group_map = {}
+
+    for group_name, group_def in USER_GROUPS.items():
+        result = await db.execute(
+            select(UserGroup).where(UserGroup.name == group_name)
+        )
+        group = result.scalar_one_or_none()
+
+        if not group:
+            group = UserGroup(
+                name=group_name,
+                description=group_def["description"],
+                requires_approval=group_def["requires_approval"],
+            )
+            db.add(group)
+            await db.flush()
+
+            # Add roles
+            for role_name in group_def["roles"]:
+                if role_name in role_map:
+                    db.add(UserGroupRole(
+                        user_group_id=group.id,
+                        role_id=role_map[role_name].id
+                    ))
+                else:
+                    print(f"  Warning: Role {role_name} not found for group {group_name}")
+
+        group_map[group_name] = group
+
+    await db.flush()
+    return group_map
+
+
 async def seed_admin_user(db: AsyncSession, role_map: dict[str, Role]) -> None:
     """Create default admin user if no users exist."""
     result = await db.execute(select(User).limit(1))
@@ -192,6 +252,10 @@ async def seed_database():
         print("Seeding roles...")
         role_map = await seed_roles(db, perm_map)
         print(f"  Created/verified {len(role_map)} roles")
+
+        print("Seeding user groups...")
+        group_map = await seed_user_groups(db, role_map)
+        print(f"  Created/verified {len(group_map)} user groups")
 
         print("Checking admin user...")
         await seed_admin_user(db, role_map)
