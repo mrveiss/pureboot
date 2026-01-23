@@ -186,60 +186,25 @@ exit
         image_url = workflow.image_url
         if not image_url:
             return generate_workflow_error_script(node, "image method requires image_url")
-        # Use .efi extension so iPXE recognizes it as EFI binary
-        deploy_kernel = f"{server}/tftp/deploy/vmlinuz-virt.efi"
+        grub_efi = f"{server}/tftp/uefi/grubx64.efi"
+        deploy_kernel = f"{server}/tftp/deploy/vmlinuz-virt"
         deploy_initrd = f"{server}/tftp/deploy/initramfs-virt"
-        # Pass deployment parameters via kernel cmdline
-        # initrd= tells the EFI stub kernel the initrd filename
-        deploy_cmdline = (
-            f"initrd=initramfs-virt "
-            f"ip=dhcp "
-            f"pureboot.server={server} "
-            f"pureboot.node_id={node.id} "
-            f"pureboot.mac={node.mac_address} "
-            f"pureboot.image_url={image_url} "
-            f"pureboot.target={workflow.target_device} "
-            f"pureboot.callback={server}/api/v1/nodes/{node.id}/installed "
-            f"console=ttyS0 console=tty0"
-        )
-        if workflow.post_script_url:
-            deploy_cmdline += f" pureboot.post_script={workflow.post_script_url}"
-        # For UEFI: use imgfetch to load kernel as EFI binary, then imgexec
-        # iPXE EFI cannot use bzImage format, but can execute EFI_STUB kernels directly
+        # iPXE EFI cannot boot Linux bzImage kernels directly (Exec format error)
+        # Solution: Chain to GRUB EFI which CAN boot Linux kernels
         boot_commands = f"""echo Image-based deployment
 echo
 echo   Image:  {image_url}
 echo   Target: {workflow.target_device}
 echo
-echo Downloading initrd from {deploy_initrd}...
-imgfetch --name initramfs-virt {deploy_initrd} || goto ierror
-echo Downloading kernel (EFI) from {deploy_kernel}...
-imgfetch --name kernel {deploy_kernel} || goto kerror
+echo Chainloading GRUB bootloader...
+echo GRUB will load the Linux kernel.
 echo
-echo Booting kernel as EFI binary...
-imgargs kernel {deploy_cmdline}
-imgexec kernel || goto booterror
+chain {grub_efi} || goto grub_error
 
-:kerror
+:grub_error
 echo
-echo *** KERNEL LOAD FAILED ***
-echo Could not load: {deploy_kernel}
-echo Press any key for shell...
-prompt
-shell
-
-:ierror
-echo
-echo *** INITRD LOAD FAILED ***
-echo Could not load: {deploy_initrd}
-echo Press any key for shell...
-prompt
-shell
-
-:booterror
-echo
-echo *** BOOT FAILED ***
-echo Failed to start kernel.
+echo *** GRUB LOAD FAILED ***
+echo Could not chainload GRUB EFI bootloader.
 echo Press any key for shell...
 prompt
 shell
@@ -247,13 +212,11 @@ shell
     elif workflow.install_method == "clone":
         # Clone mode: this node serves its disk as source for other nodes
         # Boots into deploy environment and runs disk server
-        # Use .efi extension so iPXE recognizes it as EFI binary
-        deploy_kernel = f"{server}/tftp/deploy/vmlinuz-virt.efi"
+        deploy_kernel = f"{server}/tftp/deploy/vmlinuz-virt"
         deploy_initrd = f"{server}/tftp/deploy/initramfs-virt"
+        grub_efi = f"{server}/tftp/uefi/grubx64.efi"
         # Pass clone server parameters via kernel cmdline
-        # initrd= tells the EFI stub kernel the initrd filename
         deploy_cmdline = (
-            f"initrd=initramfs-virt "
             f"ip=dhcp "
             f"pureboot.server={server} "
             f"pureboot.node_id={node.id} "
@@ -263,8 +226,10 @@ shell
             f"pureboot.callback={server}/api/v1/nodes/{node.id}/clone-ready "
             f"console=ttyS0 console=tty0"
         )
-        # For UEFI: use imgfetch to load kernel as EFI binary, then imgexec
-        # iPXE EFI cannot use bzImage format, but can execute EFI_STUB kernels directly
+        # iPXE EFI cannot boot Linux bzImage kernels directly (Exec format error)
+        # Solution: Chain to GRUB EFI which CAN boot Linux kernels
+        # GRUB will fetch its config from the server with node-specific params
+        grub_config_url = f"{server}/api/v1/grub?mac={node.mac_address}"
         boot_commands = f"""echo Clone Source Mode
 echo
 echo   This node will serve its disk for cloning
@@ -273,14 +238,21 @@ echo
 echo   Other nodes can clone from this machine.
 echo   Do NOT shut down until cloning is complete.
 echo
-echo Downloading initrd from {deploy_initrd}...
-imgfetch --name initramfs-virt {deploy_initrd} || goto ierror
-echo Downloading kernel (EFI) from {deploy_kernel}...
-imgfetch --name kernel {deploy_kernel} || goto kerror
+echo Chainloading GRUB bootloader...
+echo GRUB will load the Linux kernel.
 echo
-echo Booting kernel as EFI binary...
-imgargs kernel {deploy_cmdline}
-imgexec kernel || goto booterror
+chain {grub_efi} || goto grub_error
+
+:grub_error
+echo
+echo *** GRUB LOAD FAILED ***
+echo Could not chainload GRUB EFI bootloader.
+echo
+echo Trying direct kernel boot (may not work on all UEFI)...
+echo
+kernel {deploy_kernel} {deploy_cmdline} || goto kerror
+initrd {deploy_initrd} || goto ierror
+boot || goto booterror
 
 :kerror
 echo
@@ -516,3 +488,104 @@ async def get_boot_script(
         case _:
             # Default to local boot for unknown states
             return generate_local_boot_script()
+
+
+@router.get("/grub", response_class=PlainTextResponse)
+async def get_grub_config(
+    mac: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> str:
+    """
+    Return GRUB configuration for a node.
+
+    This is called when iPXE chainloads to GRUB. GRUB fetches this config
+    to get node-specific kernel parameters.
+    """
+    mac = validate_mac(mac)
+    server = f"http://{settings.host}:{settings.port}"
+
+    # Look up node by MAC
+    result = await db.execute(select(Node).where(Node.mac_address == mac))
+    node = result.scalar_one_or_none()
+
+    if not node or not node.workflow_id:
+        # No node or workflow - boot local
+        return """set default=0
+set timeout=5
+
+menuentry "Boot from local disk" {
+    exit
+}
+"""
+
+    try:
+        workflow = workflow_service.get_workflow(node.workflow_id)
+        workflow = workflow_service.resolve_variables(
+            workflow,
+            server=server,
+            node_id=str(node.id),
+            mac=node.mac_address,
+            ip=node.ip_address,
+        )
+    except (WorkflowNotFoundError, ValueError):
+        return f"""set default=0
+set timeout=5
+
+menuentry "Error: Workflow not found" {{
+    echo "Workflow '{node.workflow_id}' not found"
+    sleep 10
+    exit
+}}
+"""
+
+    # Generate GRUB config based on workflow
+    deploy_kernel = f"{server}/tftp/deploy/vmlinuz-virt"
+    deploy_initrd = f"{server}/tftp/deploy/initramfs-virt"
+
+    if workflow.install_method == "clone":
+        cmdline = (
+            f"ip=dhcp "
+            f"pureboot.server={server} "
+            f"pureboot.node_id={node.id} "
+            f"pureboot.mac={node.mac_address} "
+            f"pureboot.mode=clone_source "
+            f"pureboot.source_device={workflow.source_device} "
+            f"pureboot.callback={server}/api/v1/nodes/{node.id}/clone-ready "
+            f"console=ttyS0 console=tty0"
+        )
+        title = f"PureBoot Clone Source - {node.mac_address}"
+    elif workflow.install_method == "image":
+        cmdline = (
+            f"ip=dhcp "
+            f"pureboot.server={server} "
+            f"pureboot.node_id={node.id} "
+            f"pureboot.mac={node.mac_address} "
+            f"pureboot.image_url={workflow.image_url} "
+            f"pureboot.target={workflow.target_device} "
+            f"pureboot.callback={server}/api/v1/nodes/{node.id}/installed "
+            f"console=ttyS0 console=tty0"
+        )
+        title = f"PureBoot Image Deploy - {node.mac_address}"
+    else:
+        # Default kernel boot
+        deploy_kernel = f"{server}{workflow.kernel_path}"
+        deploy_initrd = f"{server}{workflow.initrd_path}"
+        cmdline = workflow.cmdline or ""
+        title = f"PureBoot Install - {workflow.name}"
+
+    return f"""set default=0
+set timeout=3
+
+menuentry "{title}" {{
+    echo "Loading kernel..."
+    linux {deploy_kernel} {cmdline}
+    echo "Loading initrd..."
+    initrd {deploy_initrd}
+    echo "Booting..."
+}}
+
+menuentry "Boot from local disk" {{
+    exit
+}}
+"""
