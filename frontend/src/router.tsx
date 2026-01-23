@@ -1,7 +1,7 @@
 import { createBrowserRouter } from 'react-router-dom'
 import { AppShell } from '@/components/layout'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
-import { Dashboard, Nodes, NodeDetail, Groups, GroupDetail, Workflows, Templates, Hypervisors, ActivityLog, Approvals, Users, Storage, Settings, Login, NotFound, UserGroups, ServiceAccounts, Roles } from '@/pages'
+import { Dashboard, Nodes, NodeDetail, Groups, GroupDetail, Workflows, Templates, Hypervisors, ActivityLog, Approvals, Users, Storage, Settings, Login, NotFound, UserGroups, ServiceAccounts, Roles, ApprovalRules } from '@/pages'
 
 export const router = createBrowserRouter([
   {
@@ -57,6 +57,14 @@ export const router = createBrowserRouter([
         element: (
           <ProtectedRoute requiredRole="admin">
             <Roles />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'approval-rules',
+        element: (
+          <ProtectedRoute requiredRole="admin">
+            <ApprovalRules />
           </ProtectedRoute>
         ),
       },
