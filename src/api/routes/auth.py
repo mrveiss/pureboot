@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.database import get_db
 from src.db.models import User, RefreshToken
+from src.services.audit import audit_action
 from src.services.ldap import ldap_service
 
 try:
@@ -184,6 +185,7 @@ async def require_role(*roles: str):
 @router.post("/auth/login", response_model=ApiResponse)
 async def login(
     data: LoginRequest,
+    request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
@@ -234,15 +236,45 @@ async def login(
         user = result.scalar_one_or_none()
 
         if not user:
+            # Audit failed login - user not found
+            await audit_action(
+                db, request,
+                action="login",
+                resource_type="session",
+                resource_name=data.username,
+                details={"reason": "User not found"},
+                result="failure",
+                error_message="Invalid credentials",
+            )
             raise HTTPException(status_code=401, detail="Invalid credentials")
 
         # Don't allow local auth for LDAP users
         if user.auth_source == "ldap":
+            await audit_action(
+                db, request,
+                action="login",
+                resource_type="session",
+                resource_id=user.id,
+                resource_name=user.username,
+                details={"reason": "LDAP user attempted local auth"},
+                result="failure",
+                error_message="LDAP authentication required",
+            )
             raise HTTPException(status_code=401, detail="LDAP authentication required")
 
         # Check if locked
         if user.locked_until and datetime.now(timezone.utc) < user.locked_until.replace(tzinfo=timezone.utc):
             remaining = (user.locked_until.replace(tzinfo=timezone.utc) - datetime.now(timezone.utc)).seconds // 60
+            await audit_action(
+                db, request,
+                action="login",
+                resource_type="session",
+                resource_id=user.id,
+                resource_name=user.username,
+                details={"reason": "Account locked", "remaining_minutes": remaining},
+                result="failure",
+                error_message=f"Account locked. Try again in {remaining} minutes.",
+            )
             raise HTTPException(
                 status_code=423,
                 detail=f"Account locked. Try again in {remaining} minutes."
@@ -250,6 +282,16 @@ async def login(
 
         # Check if active
         if not user.is_active:
+            await audit_action(
+                db, request,
+                action="login",
+                resource_type="session",
+                resource_id=user.id,
+                resource_name=user.username,
+                details={"reason": "Account disabled"},
+                result="failure",
+                error_message="Account disabled",
+            )
             raise HTTPException(status_code=401, detail="Account disabled")
 
         # Verify password
@@ -259,6 +301,16 @@ async def login(
             if user.failed_login_attempts >= MAX_FAILED_ATTEMPTS:
                 user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
             await db.flush()
+            await audit_action(
+                db, request,
+                action="login",
+                resource_type="session",
+                resource_id=user.id,
+                resource_name=user.username,
+                details={"reason": "Invalid password", "failed_attempts": user.failed_login_attempts},
+                result="failure",
+                error_message="Invalid credentials",
+            )
             raise HTTPException(status_code=401, detail="Invalid credentials")
 
         # Reset failed attempts
@@ -288,6 +340,17 @@ async def login(
         secure=False,  # Set to True in production with HTTPS
         samesite="lax",
         max_age=REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60,
+    )
+
+    # Audit successful login
+    await audit_action(
+        db, request,
+        action="login",
+        resource_type="session",
+        resource_id=user.id,
+        resource_name=user.username,
+        details={"auth_source": auth_source},
+        result="success",
     )
 
     return ApiResponse(

@@ -18,6 +18,7 @@ from src.services.approvals import (
     get_approval_with_details,
     get_pending_approvals_for_user,
 )
+from src.services.audit import audit_action
 
 router = APIRouter()
 
@@ -417,6 +418,16 @@ async def vote_on_approval(
         # Get the updated approval for status
         approval = await get_approval_with_details(db, approval_id)
         approval_status = approval.status if approval else "unknown"
+
+        # Audit vote
+        await audit_action(
+            db, request,
+            action="vote",
+            resource_type="approval",
+            resource_id=approval_id,
+            details={"vote": data.vote, "comment": data.comment},
+            result="success",
+        )
 
         return VoteResultResponse(
             success=True,
