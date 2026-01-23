@@ -23,17 +23,44 @@ def normalize_mac(mac: str) -> str:
 
 
 class NodeCreate(BaseModel):
-    """Schema for creating a new node."""
+    """Schema for creating a new node.
 
-    mac_address: str
-    hostname: str | None = None
-    arch: str = "x86_64"
-    boot_mode: str = "bios"
-    group_id: str | None = None
-    vendor: str | None = None
-    model: str | None = None
-    serial_number: str | None = None
-    system_uuid: str | None = None
+    Example:
+        ```json
+        {
+            "mac_address": "00:11:22:33:44:55",
+            "hostname": "web-server-01",
+            "arch": "x86_64",
+            "boot_mode": "uefi"
+        }
+        ```
+    """
+
+    mac_address: str = Field(
+        ...,
+        description="MAC address in format XX:XX:XX:XX:XX:XX",
+        examples=["00:11:22:33:44:55", "aa:bb:cc:dd:ee:ff"],
+    )
+    hostname: str | None = Field(
+        None,
+        description="Hostname for the node",
+        examples=["web-server-01", "db-node-02"],
+    )
+    arch: str = Field(
+        "x86_64",
+        description="CPU architecture",
+        examples=["x86_64", "arm64", "aarch64"],
+    )
+    boot_mode: str = Field(
+        "bios",
+        description="Boot mode",
+        examples=["bios", "uefi"],
+    )
+    group_id: str | None = Field(None, description="Device group ID to assign")
+    vendor: str | None = Field(None, description="Hardware vendor", examples=["Dell", "HP", "Lenovo"])
+    model: str | None = Field(None, description="Hardware model", examples=["PowerEdge R640", "ProLiant DL380"])
+    serial_number: str | None = Field(None, description="Serial number")
+    system_uuid: str | None = Field(None, description="System UUID from SMBIOS")
 
     @field_validator("mac_address")
     @classmethod
@@ -75,11 +102,31 @@ class NodeUpdate(BaseModel):
 
 
 class StateTransition(BaseModel):
-    """Request to transition node to new state."""
+    """Request to transition node to new state.
 
-    state: str
-    comment: str | None = None
-    force: bool = False  # Bypasses retry limit, resets counters
+    Example:
+        ```json
+        {
+            "state": "pending",
+            "comment": "Approved for provisioning by admin"
+        }
+        ```
+    """
+
+    state: str = Field(
+        ...,
+        description="Target state for the node",
+        examples=["pending", "installing", "active", "retired"],
+    )
+    comment: str | None = Field(
+        None,
+        description="Optional comment about the transition",
+        examples=["Approved for provisioning", "Failed hardware - replacing"],
+    )
+    force: bool = Field(
+        False,
+        description="Force transition, bypassing retry limits and resetting counters",
+    )
 
     @field_validator("state")
     @classmethod
@@ -265,9 +312,28 @@ class DeviceGroupResponse(BaseModel):
 
 
 class NodeReport(BaseModel):
-    """Node status report from the node itself."""
+    """Node status report from the node itself.
 
-    mac_address: str
+    This endpoint is called by nodes during the boot and installation process
+    to report their status and update hardware information.
+
+    Example (event-based):
+        ```json
+        {
+            "mac_address": "00:11:22:33:44:55",
+            "event": "install_progress",
+            "status": "in_progress",
+            "message": "Installing packages",
+            "ip_address": "192.168.1.100"
+        }
+        ```
+    """
+
+    mac_address: str = Field(
+        ...,
+        description="MAC address of the reporting node",
+        examples=["00:11:22:33:44:55"],
+    )
 
     # Event-based reporting (new)
     event: Literal[
@@ -278,23 +344,54 @@ class NodeReport(BaseModel):
         "install_failed",
         "first_boot",
         "heartbeat",
-    ] | None = None
-    status: Literal["success", "failed", "in_progress"] = "success"
-    message: str | None = None
-    event_metadata: dict | None = None
+    ] | None = Field(
+        None,
+        description="Event type being reported",
+    )
+    status: Literal["success", "failed", "in_progress"] = Field(
+        "success",
+        description="Status of the event",
+    )
+    message: str | None = Field(
+        None,
+        description="Human-readable status message",
+        examples=["Installing packages", "Copying files"],
+    )
+    event_metadata: dict | None = Field(
+        None,
+        description="Additional event-specific metadata",
+    )
 
     # Hardware/network info
-    ip_address: str | None = None
-    hostname: str | None = None
+    ip_address: str | None = Field(
+        None,
+        description="Current IP address of the node",
+        examples=["192.168.1.100", "10.0.0.50"],
+    )
+    hostname: str | None = Field(
+        None,
+        description="Hostname of the node",
+    )
     vendor: str | None = None
     model: str | None = None
     serial_number: str | None = None
     system_uuid: str | None = None
 
     # Legacy installation reporting (backwards compatibility)
-    installation_status: Literal["started", "progress", "complete", "failed"] | None = None
-    installation_progress: int | None = None  # 0-100
-    installation_error: str | None = None
+    installation_status: Literal["started", "progress", "complete", "failed"] | None = Field(
+        None,
+        description="Legacy: Installation status (use 'event' instead)",
+    )
+    installation_progress: int | None = Field(
+        None,
+        description="Installation progress percentage (0-100)",
+        ge=0,
+        le=100,
+    )
+    installation_error: str | None = Field(
+        None,
+        description="Error message if installation failed",
+    )
 
     @field_validator("mac_address")
     @classmethod

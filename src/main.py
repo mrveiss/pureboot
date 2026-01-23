@@ -143,11 +143,125 @@ async def _register_scheduled_jobs():
         logger.info(f"Re-registered {len(jobs)} scheduled sync jobs")
 
 
+OPENAPI_DESCRIPTION = """
+# PureBoot API
+
+PureBoot is a self-hosted, vendor-neutral node lifecycle platform for automated
+provisioning of bare-metal servers, VMs, Raspberry Pi, and enterprise devices.
+
+## Key Features
+
+- **Node Lifecycle Management**: Discover, provision, and manage nodes through their complete lifecycle
+- **State Machine**: Defined state transitions (discovered -> pending -> installing -> installed -> active)
+- **Workflow Engine**: YAML-based workflow definitions for OS installation
+- **Multi-Protocol Boot**: Support for BIOS (PXE/iPXE), UEFI, and ARM devices
+- **Storage Backends**: NFS, HTTP, S3, and iSCSI integration
+- **Approval System**: Four-eye principle for sensitive operations
+
+## Authentication
+
+The API uses JWT bearer tokens for authentication. Obtain tokens via the `/auth/login` endpoint.
+
+- Access tokens expire after 15 minutes
+- Refresh tokens are sent as httpOnly cookies and last 7 days
+
+## WebSocket Events
+
+Connect to `/api/v1/ws` for real-time updates:
+- `node.created` - New node discovered
+- `node.state_changed` - Node state transition
+- `node.updated` - Node data updated
+- `install.progress` - Installation progress update
+- `approval.requested` - New approval request
+- `approval.resolved` - Approval approved/rejected
+
+## Rate Limits
+
+No rate limits are currently enforced.
+"""
+
 app = FastAPI(
     title="PureBoot",
-    description="Unified Vendor-Neutral Node Lifecycle Platform",
+    description=OPENAPI_DESCRIPTION,
     version="0.1.0",
     lifespan=lifespan,
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
+    contact={
+        "name": "PureBoot Project",
+        "url": "https://github.com/mrveiss/pureboot",
+    },
+    license_info={
+        "name": "MIT",
+        "url": "https://opensource.org/licenses/MIT",
+    },
+    openapi_tags=[
+        {
+            "name": "nodes",
+            "description": "Node lifecycle management - discover, provision, and manage nodes",
+        },
+        {
+            "name": "workflows",
+            "description": "Workflow definitions for OS installation and provisioning",
+        },
+        {
+            "name": "groups",
+            "description": "Device groups for organizing and managing nodes",
+        },
+        {
+            "name": "auth",
+            "description": "Authentication endpoints - login, logout, token refresh",
+        },
+        {
+            "name": "users",
+            "description": "User management - create, update, delete users",
+        },
+        {
+            "name": "approvals",
+            "description": "Four-eye principle approval system for sensitive operations",
+        },
+        {
+            "name": "templates",
+            "description": "OS and configuration templates for provisioning",
+        },
+        {
+            "name": "storage",
+            "description": "Storage backend management - NFS, HTTP, S3, iSCSI",
+        },
+        {
+            "name": "files",
+            "description": "File browser for storage backends",
+        },
+        {
+            "name": "luns",
+            "description": "iSCSI LUN management for boot-from-SAN",
+        },
+        {
+            "name": "sync-jobs",
+            "description": "Scheduled synchronization jobs for storage backends",
+        },
+        {
+            "name": "boot",
+            "description": "PXE/iPXE boot endpoints - serve boot configurations",
+        },
+        {
+            "name": "ipxe",
+            "description": "iPXE-specific endpoints for network boot",
+        },
+        {
+            "name": "system",
+            "description": "System information and DHCP status",
+        },
+        {
+            "name": "activity",
+            "description": "Activity log and audit trail",
+        },
+        {
+            "name": "websocket",
+            "description": "WebSocket endpoint for real-time updates",
+        },
+    ],
 )
 
 # Mount API routes
