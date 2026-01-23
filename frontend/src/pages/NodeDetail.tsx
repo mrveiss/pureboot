@@ -1,9 +1,28 @@
+import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Server, Clock, Cpu, HardDrive, Network, Tag } from 'lucide-react'
-import { Button, Card, CardContent, CardHeader, CardTitle, Badge, Separator } from '@/components/ui'
+import { ArrowLeft, Server, Clock, Cpu, HardDrive, Network, Tag, Workflow, X } from 'lucide-react'
+import {
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Badge,
+  Separator,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from '@/components/ui'
 import { StateMachine } from '@/components/nodes/StateMachine'
-import { useNode, useUpdateNodeState } from '@/hooks'
-import { NODE_STATE_COLORS, NODE_STATE_LABELS, NODE_STATE_TRANSITIONS, type NodeState } from '@/types'
+import { useNode, useUpdateNodeState, useUpdateNode, useWorkflows } from '@/hooks'
+import { NODE_STATE_COLORS, NODE_STATE_LABELS, NODE_STATE_TRANSITIONS, ARCHITECTURE_LABELS, BOOT_MODE_LABELS, type NodeState } from '@/types'
 import { cn } from '@/lib/utils'
 
 function formatDate(dateStr: string | null): string {
@@ -15,6 +34,13 @@ export function NodeDetail() {
   const { nodeId } = useParams<{ nodeId: string }>()
   const { data: response, isLoading, error } = useNode(nodeId ?? '')
   const updateState = useUpdateNodeState()
+  const updateNode = useUpdateNode()
+  const { data: workflowsResponse } = useWorkflows()
+
+  const [workflowDialogOpen, setWorkflowDialogOpen] = useState(false)
+  const [selectedWorkflow, setSelectedWorkflow] = useState<string>('')
+
+  const workflows = workflowsResponse?.data ?? []
 
   if (isLoading) {
     return (
@@ -59,6 +85,30 @@ export function NodeDetail() {
 
     updateState.mutate({ nodeId: node.id, newState })
   }
+
+  const handleAssignWorkflow = () => {
+    const workflowId = selectedWorkflow === 'none' ? null : selectedWorkflow
+    updateNode.mutate(
+      { nodeId: node.id, data: { workflow_id: workflowId } },
+      {
+        onSuccess: () => {
+          setWorkflowDialogOpen(false)
+          setSelectedWorkflow('')
+        },
+      }
+    )
+  }
+
+  const handleClearWorkflow = () => {
+    updateNode.mutate({ nodeId: node.id, data: { workflow_id: null } })
+  }
+
+  const openWorkflowDialog = () => {
+    setSelectedWorkflow(node.workflow_id || 'none')
+    setWorkflowDialogOpen(true)
+  }
+
+  const currentWorkflow = workflows.find((w) => w.id === node.workflow_id)
 
   return (
     <div className="space-y-6">
@@ -250,32 +300,104 @@ export function NodeDetail() {
             </CardContent>
           </Card>
 
-          {/* Workflow assignment placeholder */}
+          {/* Workflow assignment */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <HardDrive className="h-5 w-5" />
+                <Workflow className="h-5 w-5" />
                 Workflow
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {node.workflow_id ? (
-                <div className="text-sm">
-                  <span className="text-muted-foreground">Assigned: </span>
-                  <span className="font-medium">{node.workflow_id}</span>
+              {currentWorkflow ? (
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="font-medium">{currentWorkflow.name}</div>
+                      <code className="text-xs text-muted-foreground">{currentWorkflow.id}</code>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                      onClick={handleClearWorkflow}
+                      disabled={updateNode.isPending}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="flex gap-2 text-xs">
+                    <Badge variant="secondary">
+                      {ARCHITECTURE_LABELS[currentWorkflow.architecture] || currentWorkflow.architecture}
+                    </Badge>
+                    <Badge variant="outline">
+                      {BOOT_MODE_LABELS[currentWorkflow.boot_mode] || currentWorkflow.boot_mode}
+                    </Badge>
+                  </div>
                 </div>
               ) : (
                 <div className="text-muted-foreground text-sm">
                   No workflow assigned
                 </div>
               )}
-              <Button variant="outline" size="sm" className="mt-4" disabled>
-                Assign Workflow (Coming Soon)
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-4"
+                onClick={openWorkflowDialog}
+              >
+                {currentWorkflow ? 'Change Workflow' : 'Assign Workflow'}
               </Button>
             </CardContent>
           </Card>
         </div>
       </div>
+
+      {/* Workflow Assignment Dialog */}
+      <Dialog open={workflowDialogOpen} onOpenChange={setWorkflowDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Assign Workflow</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            {workflows.length === 0 ? (
+              <p className="text-muted-foreground text-sm">
+                No workflows available. Add workflow YAML files to the workflows directory.
+              </p>
+            ) : (
+              <Select value={selectedWorkflow} onValueChange={setSelectedWorkflow}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a workflow..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No Workflow</SelectItem>
+                  {workflows.map((workflow) => (
+                    <SelectItem key={workflow.id} value={workflow.id}>
+                      <div className="flex items-center gap-2">
+                        <span>{workflow.name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          ({workflow.architecture}/{workflow.boot_mode})
+                        </span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setWorkflowDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAssignWorkflow}
+              disabled={!selectedWorkflow || updateNode.isPending || workflows.length === 0}
+            >
+              {updateNode.isPending ? 'Assigning...' : 'Assign'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

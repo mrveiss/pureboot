@@ -2,6 +2,7 @@ export * from './node'
 export * from './auth'
 export * from './api'
 export * from './group'
+export * from './workflow'
 
 export type {
   StorageBackendType,
