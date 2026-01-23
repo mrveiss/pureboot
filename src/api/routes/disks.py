@@ -3,15 +3,22 @@ import json
 from datetime import datetime, timezone
 from urllib.parse import unquote
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.schemas import ApiListResponse, ApiResponse, DiskInfoResponse, PartitionInfo
+from src.api.schemas import (
+    ApiListResponse,
+    ApiResponse,
+    DiskInfoResponse,
+    PartitionInfo,
+    PartitionOperationCreate,
+    PartitionOperationResponse,
+)
 from src.core.websocket import global_ws_manager
 from src.db.database import get_db
-from src.db.models import DiskInfo, Node
+from src.db.models import DiskInfo, Node, PartitionOperation
 
 router = APIRouter(tags=["Disks"])
 
@@ -241,4 +248,327 @@ async def receive_disk_report(
             "updated": updated_count,
         },
         message=f"Disk scan report processed: {created_count} created, {updated_count} updated",
+    )
+
+
+# ============== Partition Operation Schemas ==============
+
+
+class OperationStatusUpdate(BaseModel):
+    """Request body for updating operation status from node."""
+
+    status: str  # running, completed, failed
+    error_message: str | None = None
+
+
+# ============== Partition Operation Endpoints ==============
+
+
+@router.post(
+    "/nodes/{node_id}/disks/{device:path}/operations",
+    response_model=ApiResponse[PartitionOperationResponse],
+)
+async def queue_partition_operation(
+    node_id: str,
+    device: str,
+    operation_data: PartitionOperationCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Queue a new partition operation for a device.
+
+    The operation will be added to the queue and executed when apply is called.
+    """
+    # URL decode the device path
+    device = unquote(device)
+
+    # Verify node exists
+    result = await db.execute(select(Node).where(Node.id == node_id))
+    node = result.scalar_one_or_none()
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    # Get max sequence number for this node/device
+    result = await db.execute(
+        select(func.max(PartitionOperation.sequence)).where(
+            PartitionOperation.node_id == node_id,
+            PartitionOperation.device == device,
+            PartitionOperation.status == "pending",
+        )
+    )
+    max_seq = result.scalar() or 0
+    new_sequence = max_seq + 1
+
+    # Create the operation record
+    operation = PartitionOperation(
+        node_id=node_id,
+        device=device,
+        operation=operation_data.operation,
+        params_json=json.dumps(operation_data.params),
+        sequence=new_sequence,
+        status="pending",
+    )
+    db.add(operation)
+    await db.flush()
+    await db.refresh(operation)
+
+    # Broadcast operation queued event
+    await global_ws_manager.broadcast(
+        "partition.operation_queued",
+        {
+            "node_id": node_id,
+            "device": device,
+            "operation_id": operation.id,
+            "operation": operation_data.operation,
+            "sequence": new_sequence,
+        },
+    )
+
+    return ApiResponse(
+        data=PartitionOperationResponse.from_operation(operation),
+        message=f"Operation queued with sequence {new_sequence}",
+    )
+
+
+@router.get(
+    "/nodes/{node_id}/disks/{device:path}/operations",
+    response_model=ApiListResponse[PartitionOperationResponse],
+)
+async def list_partition_operations(
+    node_id: str,
+    device: str,
+    status: str | None = Query(None, description="Filter by status"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    List queued partition operations for a device.
+
+    Operations are ordered by sequence number.
+    """
+    # URL decode the device path
+    device = unquote(device)
+
+    # Verify node exists
+    result = await db.execute(select(Node).where(Node.id == node_id))
+    node = result.scalar_one_or_none()
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    # Build query
+    query = select(PartitionOperation).where(
+        PartitionOperation.node_id == node_id,
+        PartitionOperation.device == device,
+    )
+
+    if status:
+        valid_statuses = {"pending", "running", "completed", "failed"}
+        if status not in valid_statuses:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid status. Must be one of: {', '.join(sorted(valid_statuses))}",
+            )
+        query = query.where(PartitionOperation.status == status)
+
+    query = query.order_by(PartitionOperation.sequence)
+
+    result = await db.execute(query)
+    operations = result.scalars().all()
+
+    return ApiListResponse(
+        data=[PartitionOperationResponse.from_operation(op) for op in operations],
+        total=len(operations),
+    )
+
+
+@router.delete(
+    "/nodes/{node_id}/disks/{device:path}/operations/{operation_id}",
+    response_model=ApiResponse[dict],
+)
+async def remove_partition_operation(
+    node_id: str,
+    device: str,
+    operation_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Remove a pending partition operation.
+
+    Only operations with status 'pending' can be removed.
+    """
+    # URL decode the device path
+    device = unquote(device)
+
+    # Verify node exists
+    result = await db.execute(select(Node).where(Node.id == node_id))
+    node = result.scalar_one_or_none()
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    # Get the operation
+    result = await db.execute(
+        select(PartitionOperation).where(
+            PartitionOperation.id == operation_id,
+            PartitionOperation.node_id == node_id,
+            PartitionOperation.device == device,
+        )
+    )
+    operation = result.scalar_one_or_none()
+
+    if not operation:
+        raise HTTPException(status_code=404, detail="Operation not found")
+
+    if operation.status != "pending":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot remove operation with status '{operation.status}'. Only pending operations can be removed.",
+        )
+
+    await db.delete(operation)
+    await db.flush()
+
+    return ApiResponse(
+        data={"operation_id": operation_id, "removed": True},
+        message="Operation removed successfully",
+    )
+
+
+@router.post(
+    "/nodes/{node_id}/disks/{device:path}/apply",
+    response_model=ApiResponse[dict],
+)
+async def apply_partition_operations(
+    node_id: str,
+    device: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Execute all pending partition operations on a device.
+
+    This broadcasts an event that the node agent will pick up to execute
+    the queued operations.
+    """
+    # URL decode the device path
+    device = unquote(device)
+
+    # Verify node exists
+    result = await db.execute(select(Node).where(Node.id == node_id))
+    node = result.scalar_one_or_none()
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    # Get pending operations count
+    result = await db.execute(
+        select(func.count(PartitionOperation.id)).where(
+            PartitionOperation.node_id == node_id,
+            PartitionOperation.device == device,
+            PartitionOperation.status == "pending",
+        )
+    )
+    pending_count = result.scalar() or 0
+
+    if pending_count == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="No pending operations to apply",
+        )
+
+    # Broadcast apply requested event
+    await global_ws_manager.broadcast(
+        "partition.operations_apply_requested",
+        {
+            "node_id": node_id,
+            "mac_address": node.mac_address,
+            "device": device,
+            "pending_count": pending_count,
+        },
+    )
+
+    return ApiResponse(
+        data={
+            "node_id": node_id,
+            "device": device,
+            "pending_count": pending_count,
+            "status": "apply_requested",
+        },
+        message=f"Apply requested for {pending_count} pending operations",
+    )
+
+
+@router.post(
+    "/nodes/{node_id}/partition-operations/{operation_id}/status",
+    response_model=ApiResponse[dict],
+)
+async def update_operation_status(
+    node_id: str,
+    operation_id: str,
+    status_update: OperationStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Receive operation status update from a node.
+
+    This endpoint is called by node agents to report the status of
+    partition operations as they execute.
+    """
+    # Verify node exists
+    result = await db.execute(select(Node).where(Node.id == node_id))
+    node = result.scalar_one_or_none()
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    # Get the operation
+    result = await db.execute(
+        select(PartitionOperation).where(
+            PartitionOperation.id == operation_id,
+            PartitionOperation.node_id == node_id,
+        )
+    )
+    operation = result.scalar_one_or_none()
+
+    if not operation:
+        raise HTTPException(status_code=404, detail="Operation not found")
+
+    # Validate status
+    valid_statuses = {"running", "completed", "failed"}
+    if status_update.status not in valid_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status. Must be one of: {', '.join(sorted(valid_statuses))}",
+        )
+
+    # Update operation
+    operation.status = status_update.status
+    if status_update.error_message:
+        operation.error_message = status_update.error_message
+    if status_update.status in ("completed", "failed"):
+        operation.executed_at = datetime.now(timezone.utc)
+
+    await db.flush()
+
+    # Broadcast appropriate event based on status
+    event_map = {
+        "running": "partition.operation_started",
+        "completed": "partition.operation_complete",
+        "failed": "partition.operation_failed",
+    }
+    event_type = event_map[status_update.status]
+
+    event_data = {
+        "node_id": node_id,
+        "operation_id": operation_id,
+        "device": operation.device,
+        "operation": operation.operation,
+        "status": status_update.status,
+    }
+    if status_update.error_message:
+        event_data["error_message"] = status_update.error_message
+
+    await global_ws_manager.broadcast(event_type, event_data)
+
+    return ApiResponse(
+        data={
+            "operation_id": operation_id,
+            "status": status_update.status,
+        },
+        message=f"Operation status updated to {status_update.status}",
     )
