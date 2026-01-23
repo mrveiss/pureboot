@@ -19,6 +19,7 @@ from src.api.routes.users import router as users_router
 from src.api.routes.ws import router as ws_router
 from src.api.routes.hypervisors import router as hypervisors_router
 from src.api.routes.clone import router as clone_router
+from src.api.routes.disks import router as disks_router
 from src.core.ca import ca_service
 from src.db.database import init_db, close_db, async_session_factory
 from src.config import settings
@@ -272,6 +273,10 @@ app = FastAPI(
             "name": "clone-sessions",
             "description": "Disk cloning session management - create and monitor clone operations",
         },
+        {
+            "name": "disks",
+            "description": "Disk and partition information - scan and retrieve disk layouts from nodes",
+        },
     ],
 )
 
@@ -294,6 +299,7 @@ app.include_router(users_router, prefix="/api/v1", tags=["users"])
 app.include_router(ws_router, prefix="/api/v1", tags=["websocket"])
 app.include_router(hypervisors_router, prefix="/api/v1", tags=["hypervisors"])
 app.include_router(clone_router, prefix="/api/v1", tags=["clone-sessions"])
+app.include_router(disks_router, prefix="/api/v1", tags=["disks"])
 
 # Static assets directory
 assets_dir = Path("assets")
