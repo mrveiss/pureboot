@@ -463,3 +463,106 @@ async def clone_failed(
         data={"status": "failed"},
         message=f"Clone failed: {error}",
     )
+
+
+@router.post("/clone-sessions/{session_id}/start", response_model=ApiResponse[dict])
+async def start_clone_session(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Start a clone session by triggering the source node to boot into clone mode.
+
+    This endpoint:
+    1. Validates the session exists and is in "pending" status
+    2. Generates TLS certificates for source (and target if assigned)
+    3. Sets the source node's workflow to boot into clone source mode
+    4. Broadcasts clone.started WebSocket event
+
+    The source node will boot into a special clone environment that:
+    - Serves the source disk over the network
+    - Reports readiness via the /source-ready endpoint
+    """
+    # Load session with relationships
+    result = await db.execute(
+        select(CloneSession)
+        .options(
+            selectinload(CloneSession.source_node),
+            selectinload(CloneSession.target_node),
+        )
+        .where(CloneSession.id == session_id)
+    )
+    session = result.scalar_one_or_none()
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Clone session not found")
+
+    if session.status != "pending":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot start session in '{session.status}' status. Must be 'pending'.",
+        )
+
+    # Generate TLS certificates if CA is initialized
+    if ca_service.is_initialized:
+        # Generate source certificate
+        source_cert, source_key = ca_service.issue_session_cert(
+            session.id, "source"
+        )
+        session.source_cert_pem = source_cert
+        session.source_key_pem = source_key
+
+        # Generate target certificate if target node is assigned
+        if session.target_node_id:
+            target_cert, target_key = ca_service.issue_session_cert(
+                session.id, "target"
+            )
+            session.target_cert_pem = target_cert
+            session.target_key_pem = target_key
+
+    # Set session start time
+    session.started_at = datetime.now(timezone.utc)
+
+    # Configure source node for clone boot
+    # We use a special workflow ID format: clone-source:<session_id>
+    # The boot endpoint will detect this and generate appropriate boot config
+    source_node = session.source_node
+    if source_node:
+        # Set clone workflow - format: clone-source:<session_id>:<device>
+        # This allows the boot endpoint to look up the session and device
+        source_node.workflow_id = f"clone-source:{session.id}:{session.source_device}"
+
+        # Transition to pending state so node will boot into clone mode on next boot
+        # The boot endpoint checks for 'pending' state to serve install/clone scripts
+        if source_node.state in ("discovered", "active", "installed"):
+            source_node.state = "pending"
+            source_node.state_changed_at = datetime.now(timezone.utc)
+
+    await db.flush()
+
+    # Broadcast clone started event
+    await global_ws_manager.broadcast(
+        "clone.started",
+        {
+            "session_id": session_id,
+            "source_node_id": session.source_node_id,
+            "target_node_id": session.target_node_id,
+            "clone_mode": session.clone_mode,
+            "source_device": session.source_device,
+        },
+    )
+
+    # Determine source boot mode based on node's boot_mode setting
+    source_boot_mode = "bios"
+    if source_node:
+        source_boot_mode = source_node.boot_mode or "bios"
+
+    return ApiResponse(
+        data={
+            "session_id": session_id,
+            "source_boot_mode": source_boot_mode,
+            "status": "starting",
+            "message": "Source node configured for clone boot. Reboot source node to begin.",
+        },
+        message="Clone session started. Reboot source node to begin cloning.",
+    )
