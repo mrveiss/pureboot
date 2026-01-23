@@ -449,6 +449,12 @@ class User(Base):
         String(20), default="viewer", nullable=False
     )  # admin, operator, approver, viewer
 
+    # RBAC role reference (for new permission system)
+    role_id: Mapped[str | None] = mapped_column(
+        ForeignKey("roles.id"), nullable=True
+    )
+    role_ref: Mapped["Role | None"] = relationship()
+
     # Account status
     is_active: Mapped[bool] = mapped_column(default=True)
     failed_login_attempts: Mapped[int] = mapped_column(default=0)
@@ -459,6 +465,67 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         default=func.now(), onupdate=func.now()
+    )
+
+
+class Role(Base):
+    """Role definition for RBAC."""
+
+    __tablename__ = "roles"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(String(255))
+    is_system_role: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        default=func.now(), onupdate=func.now()
+    )
+
+    # Relationships
+    permissions: Mapped[list["Permission"]] = relationship(
+        secondary="role_permissions", back_populates="roles"
+    )
+
+
+class Permission(Base):
+    """Permission definition for RBAC."""
+
+    __tablename__ = "permissions"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    resource: Mapped[str] = mapped_column(String(50), nullable=False)
+    action: Mapped[str] = mapped_column(String(50), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        default=func.now(), onupdate=func.now()
+    )
+
+    # Relationships
+    roles: Mapped[list["Role"]] = relationship(
+        secondary="role_permissions", back_populates="permissions"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("resource", "action", name="uq_permission_resource_action"),
+    )
+
+
+class RolePermission(Base):
+    """Association table for roles and permissions."""
+
+    __tablename__ = "role_permissions"
+
+    role_id: Mapped[str] = mapped_column(
+        ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True
+    )
+    permission_id: Mapped[str] = mapped_column(
+        ForeignKey("permissions.id", ondelete="CASCADE"), primary_key=True
     )
 
 
