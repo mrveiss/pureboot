@@ -22,3 +22,5 @@ export {
 } from './select'
 export { Separator } from './separator'
 export { Tabs, TabsList, TabsTrigger, TabsContent } from './tabs'
+export { Switch } from './switch'
+export { Collapsible, CollapsibleTrigger, CollapsibleContent } from './collapsible'
