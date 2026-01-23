@@ -16,3 +16,4 @@ cryptography>=42.0.0
 apscheduler>=3.10.0
 bcrypt>=4.1.0
 ldap3>=2.9.0
+PyJWT>=2.8.0
