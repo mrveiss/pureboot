@@ -55,10 +55,17 @@ apk add --no-cache \
     e2fsprogs-extra \
     dosfstools \
     ntfs-3g \
+    ntfs-3g-progs \
     util-linux \
     coreutils \
     bash \
-    jq
+    jq \
+    openssl \
+    lighttpd \
+    lighttpd-mod_auth \
+    btrfs-progs \
+    xfsprogs \
+    bc
 INSTALL_EOF
 chmod +x "${ROOTFS_DIR}/install-packages.sh"
 
@@ -293,6 +300,15 @@ main() {
 main "$@"
 DEPLOY_EOF
 chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-deploy"
+
+# Copy clone scripts
+echo "Copying clone scripts..."
+cp "${SCRIPT_DIR}/scripts/pureboot-common.sh" "${ROOTFS_DIR}/usr/local/bin/"
+cp "${SCRIPT_DIR}/scripts/pureboot-clone-source-direct.sh" "${ROOTFS_DIR}/usr/local/bin/"
+cp "${SCRIPT_DIR}/scripts/pureboot-clone-target-direct.sh" "${ROOTFS_DIR}/usr/local/bin/"
+chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-common.sh"
+chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-clone-source-direct.sh"
+chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-clone-target-direct.sh"
 
 # Create init script
 cat > "${ROOTFS_DIR}/init" << 'INIT_EOF'
