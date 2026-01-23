@@ -1,21 +1,24 @@
-import { useRef, useState, useEffect } from 'react'
+import { useRef, useState, useEffect, useMemo } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { Link } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { Badge, Button, Input, Checkbox } from '@/components/ui'
-import { Search, ChevronUp, ChevronDown, Filter } from 'lucide-react'
+import { Search, ChevronUp, ChevronDown, Filter, Workflow } from 'lucide-react'
 import { NODE_STATE_COLORS, NODE_STATE_LABELS, type Node, type NodeState } from '@/types'
 import { useSelectionStore } from '@/stores'
+import { useWorkflows } from '@/hooks'
 
 interface NodeTableProps {
   nodes: Node[]
   isLoading?: boolean
   onStateFilter?: (state: NodeState | null) => void
   selectedState?: NodeState | null
+  onWorkflowFilter?: (workflowId: string | null) => void
+  selectedWorkflow?: string | null
   enableSelection?: boolean
 }
 
-type SortField = 'hostname' | 'node_id' | 'mac_address' | 'ip_address' | 'state' | 'arch' | 'last_seen_at'
+type SortField = 'hostname' | 'node_id' | 'mac_address' | 'ip_address' | 'state' | 'arch' | 'workflow' | 'last_seen_at'
 type SortDirection = 'asc' | 'desc'
 
 function StateBadge({ state }: { state: NodeState }) {
@@ -56,12 +59,24 @@ export function NodeTable({
   isLoading,
   onStateFilter,
   selectedState,
+  onWorkflowFilter,
+  selectedWorkflow,
   enableSelection = true,
 }: NodeTableProps) {
   const parentRef = useRef<HTMLDivElement>(null)
   const [search, setSearch] = useState('')
   const [sortField, setSortField] = useState<SortField>('hostname')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
+
+  const { data: workflowsResponse } = useWorkflows()
+  const workflows = workflowsResponse?.data ?? []
+
+  // Create a map of workflow ID to name for quick lookup
+  const workflowMap = useMemo(() => {
+    const map = new Map<string, string>()
+    workflows.forEach(w => map.set(w.id, w.name))
+    return map
+  }, [workflows])
 
   const {
     selectedNodeIds,
@@ -112,6 +127,10 @@ export function NodeTable({
       case 'arch':
         aVal = a.arch
         bVal = b.arch
+        break
+      case 'workflow':
+        aVal = a.workflow_id ? (workflowMap.get(a.workflow_id) ?? a.workflow_id) : ''
+        bVal = b.workflow_id ? (workflowMap.get(b.workflow_id) ?? b.workflow_id) : ''
         break
       case 'last_seen_at':
         aVal = a.last_seen_at ?? ''
@@ -210,6 +229,38 @@ export function NodeTable({
             </div>
           </div>
         )}
+
+        {onWorkflowFilter && workflows.length > 0 && (
+          <div className="flex items-center gap-2">
+            <Workflow className="h-4 w-4 text-muted-foreground" />
+            <div className="flex flex-wrap gap-1">
+              <Button
+                variant={selectedWorkflow === null ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => onWorkflowFilter(null)}
+              >
+                All Workflows
+              </Button>
+              <Button
+                variant={selectedWorkflow === 'none' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => onWorkflowFilter('none')}
+              >
+                No Workflow
+              </Button>
+              {workflows.map((workflow) => (
+                <Button
+                  key={workflow.id}
+                  variant={selectedWorkflow === workflow.id ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => onWorkflowFilter(workflow.id)}
+                >
+                  {workflow.name}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Table */}
@@ -254,6 +305,12 @@ export function NodeTable({
             onClick={() => handleSort('state')}
           >
             State <SortIcon field="state" />
+          </button>
+          <button
+            className="w-32 p-3 text-left flex items-center gap-1 hover:bg-muted"
+            onClick={() => handleSort('workflow')}
+          >
+            Workflow <SortIcon field="workflow" />
           </button>
           <button
             className="w-20 p-3 text-left flex items-center gap-1 hover:bg-muted"
@@ -336,6 +393,15 @@ export function NodeTable({
                       </div>
                       <div className="w-28 p-3">
                         <StateBadge state={node.state} />
+                      </div>
+                      <div className="w-32 p-3 text-sm truncate">
+                        {node.workflow_id ? (
+                          <span className="text-primary" title={workflowMap.get(node.workflow_id) ?? node.workflow_id}>
+                            {workflowMap.get(node.workflow_id) ?? node.workflow_id}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
                       </div>
                       <div className="w-20 p-3 text-sm">{node.arch}</div>
                       <div className="w-24 p-3 text-sm text-muted-foreground">

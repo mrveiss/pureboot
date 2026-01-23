@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Server, Clock, Cpu, Network, Tag, Workflow, X } from 'lucide-react'
+import { ArrowLeft, Server, Clock, Cpu, Network, Tag, Workflow, X, Play, RotateCcw, XCircle } from 'lucide-react'
 import {
   Button,
   Card,
@@ -299,6 +299,95 @@ export function NodeDetail() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Quick Actions */}
+          {(node.state === 'discovered' || node.state === 'pending' || node.state === 'installing' || node.state === 'installed') && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Play className="h-5 w-5" />
+                  Quick Actions
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {/* Discovered state: Approve for provisioning */}
+                {node.state === 'discovered' && (
+                  <div className="space-y-2">
+                    <Button
+                      className="w-full"
+                      onClick={() => handleStateTransition('pending')}
+                      disabled={updateState.isPending || !node.workflow_id}
+                    >
+                      <Play className="mr-2 h-4 w-4" />
+                      Approve for Provisioning
+                    </Button>
+                    {!node.workflow_id && (
+                      <p className="text-xs text-muted-foreground">
+                        Assign a workflow first to approve this node for provisioning
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Pending state: Ready to boot */}
+                {node.state === 'pending' && (
+                  <div className="rounded-lg border p-3 bg-muted/50">
+                    <div className="flex items-center gap-2 text-sm">
+                      <div className="h-2 w-2 rounded-full bg-yellow-500 animate-pulse" />
+                      <span>Waiting for node to PXE boot</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      The node will automatically transition to &apos;Installing&apos; when it boots from the network
+                    </p>
+                  </div>
+                )}
+
+                {/* Installing state: Progress indicator */}
+                {node.state === 'installing' && (
+                  <div className="space-y-3">
+                    <div className="rounded-lg border p-3 bg-muted/50">
+                      <div className="flex items-center gap-2 text-sm">
+                        <div className="h-2 w-2 rounded-full bg-orange-500 animate-pulse" />
+                        <span>Installation in progress</span>
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => handleStateTransition('pending')}
+                      disabled={updateState.isPending}
+                    >
+                      <RotateCcw className="mr-2 h-4 w-4" />
+                      Retry Installation
+                    </Button>
+                  </div>
+                )}
+
+                {/* Installed state: Activate */}
+                {node.state === 'installed' && (
+                  <div className="space-y-2">
+                    <div className="rounded-lg border p-3 bg-muted/50">
+                      <div className="flex items-center gap-2 text-sm">
+                        <div className="h-2 w-2 rounded-full bg-teal-500" />
+                        <span>Installation complete</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Waiting for first boot from local disk
+                      </p>
+                    </div>
+                    <Button
+                      className="w-full"
+                      onClick={() => handleStateTransition('active')}
+                      disabled={updateState.isPending}
+                    >
+                      <Play className="mr-2 h-4 w-4" />
+                      Mark as Active
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Workflow assignment */}
           <Card>

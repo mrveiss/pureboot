@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Card, CardContent, CardHeader, Button } from '@/components/ui'
 import { Plus, RefreshCw } from 'lucide-react'
 import { NodeTable, BulkActionBar, RegisterNodeDialog } from '@/components/nodes'
@@ -7,13 +7,21 @@ import type { NodeState } from '@/types'
 
 export function Nodes() {
   const [stateFilter, setStateFilter] = useState<NodeState | null>(null)
+  const [workflowFilter, setWorkflowFilter] = useState<string | null>(null)
   const [registerDialogOpen, setRegisterDialogOpen] = useState(false)
 
   const { data: response, isLoading, refetch, isFetching } = useNodes(
     stateFilter ? { state: stateFilter, limit: 1000 } : { limit: 1000 }
   )
 
-  const nodes = response?.data ?? []
+  const allNodes = response?.data ?? []
+
+  // Client-side workflow filtering
+  const nodes = useMemo(() => {
+    if (!workflowFilter) return allNodes
+    if (workflowFilter === 'none') return allNodes.filter(n => !n.workflow_id)
+    return allNodes.filter(n => n.workflow_id === workflowFilter)
+  }, [allNodes, workflowFilter])
 
   return (
     <div className="space-y-6">
@@ -43,6 +51,8 @@ export function Nodes() {
             isLoading={isLoading}
             onStateFilter={setStateFilter}
             selectedState={stateFilter}
+            onWorkflowFilter={setWorkflowFilter}
+            selectedWorkflow={workflowFilter}
             enableSelection={true}
           />
         </CardContent>

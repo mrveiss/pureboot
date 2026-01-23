@@ -4,23 +4,27 @@ import {
   Tag,
   RefreshCw,
   X,
+  Workflow,
 } from 'lucide-react'
-import { Button, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, Input, Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui'
+import { Button, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, Input, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, Badge } from '@/components/ui'
 import { useSelectionStore } from '@/stores'
-import { useGroups, useBulkAssignGroup, useBulkAddTag, useBulkChangeState } from '@/hooks'
-import { NODE_STATE_LABELS, type NodeState } from '@/types'
+import { useGroups, useBulkAssignGroup, useBulkAddTag, useBulkChangeState, useWorkflows, useBulkAssignWorkflow } from '@/hooks'
+import { NODE_STATE_LABELS, ARCHITECTURE_LABELS, BOOT_MODE_LABELS, type NodeState } from '@/types'
 
-type ActionDialogType = 'group' | 'tag' | 'state' | null
+type ActionDialogType = 'group' | 'tag' | 'state' | 'workflow' | null
 
 export function BulkActionBar() {
   const { selectedNodeIds, deselectAll } = useSelectionStore()
   const [activeDialog, setActiveDialog] = useState<ActionDialogType>(null)
   const [selectedGroup, setSelectedGroup] = useState<string>('')
+  const [selectedWorkflow, setSelectedWorkflow] = useState<string>('')
   const [tagInput, setTagInput] = useState('')
   const [selectedState, setSelectedState] = useState<NodeState | ''>('')
 
   const { data: groupsResponse } = useGroups()
+  const { data: workflowsResponse } = useWorkflows()
   const assignGroup = useBulkAssignGroup()
+  const assignWorkflow = useBulkAssignWorkflow()
   const addTag = useBulkAddTag()
   const changeState = useBulkChangeState()
 
@@ -29,6 +33,7 @@ export function BulkActionBar() {
   if (selectedCount === 0) return null
 
   const groups = groupsResponse?.data ?? []
+  const workflows = workflowsResponse?.data ?? []
   const nodeIds = Array.from(selectedNodeIds)
 
   const handleAssignGroup = () => {
@@ -40,6 +45,17 @@ export function BulkActionBar() {
     }
     setActiveDialog(null)
     setSelectedGroup('')
+  }
+
+  const handleAssignWorkflow = () => {
+    if (selectedWorkflow) {
+      assignWorkflow.mutate({
+        nodeIds,
+        workflowId: selectedWorkflow === 'none' ? null : selectedWorkflow,
+      })
+    }
+    setActiveDialog(null)
+    setSelectedWorkflow('')
   }
 
   const handleAddTag = () => {
@@ -69,6 +85,16 @@ export function BulkActionBar() {
           </span>
 
           <div className="h-6 w-px bg-border" />
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setActiveDialog('workflow')}
+            className="gap-2"
+          >
+            <Workflow className="h-4 w-4" />
+            Assign Workflow
+          </Button>
 
           <Button
             variant="ghost"
@@ -193,6 +219,51 @@ export function BulkActionBar() {
             </Button>
             <Button onClick={handleChangeState} disabled={!selectedState || changeState.isPending}>
               {changeState.isPending ? 'Changing...' : 'Change State'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Assign Workflow Dialog */}
+      <Dialog open={activeDialog === 'workflow'} onOpenChange={(open) => !open && setActiveDialog(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Assign Workflow to {selectedCount} Nodes</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground mb-4">
+              Select a workflow to assign to the selected nodes. Nodes must be in &apos;discovered&apos; or &apos;pending&apos; state to boot with a workflow.
+            </p>
+            <Select value={selectedWorkflow} onValueChange={setSelectedWorkflow}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a workflow..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No Workflow</SelectItem>
+                {workflows.map((workflow) => (
+                  <SelectItem key={workflow.id} value={workflow.id}>
+                    <div className="flex flex-col gap-1">
+                      <span>{workflow.name}</span>
+                      <div className="flex gap-1">
+                        <Badge variant="secondary" className="text-xs">
+                          {ARCHITECTURE_LABELS[workflow.architecture] || workflow.architecture}
+                        </Badge>
+                        <Badge variant="outline" className="text-xs">
+                          {BOOT_MODE_LABELS[workflow.boot_mode] || workflow.boot_mode}
+                        </Badge>
+                      </div>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setActiveDialog(null)}>
+              Cancel
+            </Button>
+            <Button onClick={handleAssignWorkflow} disabled={!selectedWorkflow || assignWorkflow.isPending}>
+              {assignWorkflow.isPending ? 'Assigning...' : 'Assign'}
             </Button>
           </DialogFooter>
         </DialogContent>
