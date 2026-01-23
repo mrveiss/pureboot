@@ -78,64 +78,86 @@ else
 fi
 rm -f "${ROOTFS_DIR}/install-packages.sh"
 
-# Add PureBoot deploy script
+# Add PureBoot deploy mode dispatcher
 mkdir -p "${ROOTFS_DIR}/usr/local/bin"
 cat > "${ROOTFS_DIR}/usr/local/bin/pureboot-deploy" << 'DEPLOY_EOF'
+#!/bin/bash
+# PureBoot Deploy Mode Dispatcher
+# Routes to appropriate script based on pureboot.mode kernel parameter
+
+set -e
+
+# Source common functions (initializes environment and parses cmdline)
+source /usr/local/bin/pureboot-common.sh
+
+# Initialize common functions
+pb_init
+
+pb_log "=== PureBoot Deploy Mode Dispatcher ==="
+pb_log "Mode: ${PUREBOOT_MODE:-image (default)}"
+
+# Dispatch based on mode
+case "${PUREBOOT_MODE}" in
+    clone_source_direct)
+        pb_log "Dispatching to clone source (direct P2P)..."
+        exec /usr/local/bin/pureboot-clone-source-direct.sh
+        ;;
+    clone_target_direct)
+        pb_log "Dispatching to clone target (direct P2P)..."
+        exec /usr/local/bin/pureboot-clone-target-direct.sh
+        ;;
+    clone_source_staged)
+        pb_log "Dispatching to clone source (staged)..."
+        exec /usr/local/bin/pureboot-clone-source-staged.sh
+        ;;
+    clone_target_staged)
+        pb_log "Dispatching to clone target (staged)..."
+        exec /usr/local/bin/pureboot-clone-target-staged.sh
+        ;;
+    partition)
+        pb_log "Dispatching to partition management..."
+        exec /usr/local/bin/pureboot-partition.sh
+        ;;
+    image|"")
+        pb_log "Dispatching to image deployment (legacy)..."
+        exec /usr/local/bin/pureboot-image.sh
+        ;;
+    *)
+        pb_error "Unknown mode: ${PUREBOOT_MODE}"
+        pb_log "Valid modes:"
+        pb_log "  image (default)      - Deploy disk image from URL"
+        pb_log "  clone_source_direct  - P2P clone: serve disk to target"
+        pb_log "  clone_target_direct  - P2P clone: receive disk from source"
+        pb_log "  clone_source_staged  - Staged clone: upload to server (future)"
+        pb_log "  clone_target_staged  - Staged clone: download from server (future)"
+        pb_log "  partition            - Partition management (future)"
+        exit 1
+        ;;
+esac
+DEPLOY_EOF
+chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-deploy"
+
+# Add PureBoot legacy image deployment script
+cat > "${ROOTFS_DIR}/usr/local/bin/pureboot-image.sh" << 'IMAGE_EOF'
 #!/bin/bash
 # PureBoot Image Deployment Script
 # Reads parameters from kernel cmdline and deploys disk image
 
 set -e
 
-log() {
-    echo "[PureBoot] $*"
-}
+# Source common functions
+source /usr/local/bin/pureboot-common.sh
 
-error() {
-    log "ERROR: $*"
-    # Notify server of failure
-    if [ -n "${PUREBOOT_SERVER}" ] && [ -n "${PUREBOOT_NODE_ID}" ]; then
-        curl -sf -X POST "${PUREBOOT_SERVER}/api/v1/nodes/${PUREBOOT_NODE_ID}/install-failed" \
-            -H "Content-Type: application/json" \
-            -d "{\"error\": \"$*\"}" || true
-    fi
-    exit 1
-}
+# Initialize if not already done (in case called directly)
+if [ -z "${PUREBOOT_INITIALIZED}" ]; then
+    pb_init
+fi
 
-# Parse kernel cmdline for pureboot.* parameters
-parse_cmdline() {
-    for param in $(cat /proc/cmdline); do
-        case "$param" in
-            pureboot.server=*)
-                PUREBOOT_SERVER="${param#pureboot.server=}"
-                ;;
-            pureboot.node_id=*)
-                PUREBOOT_NODE_ID="${param#pureboot.node_id=}"
-                ;;
-            pureboot.mac=*)
-                PUREBOOT_MAC="${param#pureboot.mac=}"
-                ;;
-            pureboot.image_url=*)
-                PUREBOOT_IMAGE_URL="${param#pureboot.image_url=}"
-                ;;
-            pureboot.target=*)
-                PUREBOOT_TARGET="${param#pureboot.target=}"
-                ;;
-            pureboot.callback=*)
-                PUREBOOT_CALLBACK="${param#pureboot.callback=}"
-                ;;
-            pureboot.post_script=*)
-                PUREBOOT_POST_SCRIPT="${param#pureboot.post_script=}"
-                ;;
-        esac
-    done
-}
-
-# Verify required parameters
+# Verify required parameters for image deployment
 verify_params() {
-    [ -z "${PUREBOOT_IMAGE_URL}" ] && error "Missing pureboot.image_url"
-    [ -z "${PUREBOOT_TARGET}" ] && error "Missing pureboot.target"
-    [ ! -b "${PUREBOOT_TARGET}" ] && error "Target device not found: ${PUREBOOT_TARGET}"
+    [ -z "${PUREBOOT_IMAGE_URL}" ] && pb_error "Missing pureboot.image_url"
+    [ -z "${PUREBOOT_TARGET}" ] && pb_error "Missing pureboot.target"
+    [ ! -b "${PUREBOOT_TARGET}" ] && pb_error "Target device not found: ${PUREBOOT_TARGET}"
 }
 
 # Detect image format from URL or content
@@ -165,41 +187,41 @@ deploy_image() {
     local format
     format=$(detect_format "${PUREBOOT_IMAGE_URL}")
 
-    log "Deploying image to ${PUREBOOT_TARGET}"
-    log "Image URL: ${PUREBOOT_IMAGE_URL}"
-    log "Format: ${format}"
+    pb_log "Deploying image to ${PUREBOOT_TARGET}"
+    pb_log "Image URL: ${PUREBOOT_IMAGE_URL}"
+    pb_log "Format: ${format}"
 
     # Get target device size
     local target_size
     target_size=$(blockdev --getsize64 "${PUREBOOT_TARGET}")
-    log "Target size: $((target_size / 1024 / 1024 / 1024)) GB"
+    pb_log "Target size: $((target_size / 1024 / 1024 / 1024)) GB"
 
     # Download and write image
     case "${format}" in
         raw.gz)
-            log "Downloading and decompressing gzip image..."
+            pb_log "Downloading and decompressing gzip image..."
             curl -sfL "${PUREBOOT_IMAGE_URL}" | pigz -d | dd of="${PUREBOOT_TARGET}" bs=4M status=progress
             ;;
         raw.xz)
-            log "Downloading and decompressing xz image..."
+            pb_log "Downloading and decompressing xz image..."
             curl -sfL "${PUREBOOT_IMAGE_URL}" | xz -d | dd of="${PUREBOOT_TARGET}" bs=4M status=progress
             ;;
         raw)
-            log "Downloading raw image..."
+            pb_log "Downloading raw image..."
             curl -sfL "${PUREBOOT_IMAGE_URL}" | dd of="${PUREBOOT_TARGET}" bs=4M status=progress
             ;;
         *)
-            error "Unsupported image format: ${format}"
+            pb_error "Unsupported image format: ${format}"
             ;;
     esac
 
     sync
-    log "Image written successfully"
+    pb_log "Image written successfully"
 }
 
 # Resize last partition to fill disk
 resize_partitions() {
-    log "Resizing partitions..."
+    pb_log "Resizing partitions..."
 
     # Re-read partition table
     partprobe "${PUREBOOT_TARGET}" || true
@@ -212,7 +234,7 @@ resize_partitions() {
     part_num=$(echo "${last_part}" | sed 's/[^0-9]*//g')
 
     if [ -n "${part_num}" ]; then
-        log "Extending partition ${part_num}..."
+        pb_log "Extending partition ${part_num}..."
         # Use growpart if available, otherwise use parted
         if command -v growpart >/dev/null 2>&1; then
             growpart "${PUREBOOT_TARGET}" "${part_num}" || true
@@ -230,76 +252,75 @@ resize_partitions() {
             fstype=$(blkid -o value -s TYPE "${part_dev}" 2>/dev/null || echo "")
             case "${fstype}" in
                 ext4|ext3|ext2)
-                    log "Resizing ext filesystem on ${part_dev}..."
+                    pb_log "Resizing ext filesystem on ${part_dev}..."
                     e2fsck -f -y "${part_dev}" || true
                     resize2fs "${part_dev}" || true
                     ;;
                 ntfs)
-                    log "NTFS resize not supported in deploy environment"
+                    pb_log "NTFS resize not supported in deploy environment"
                     ;;
                 *)
-                    log "Unknown filesystem type: ${fstype}"
+                    pb_log "Unknown filesystem type: ${fstype}"
                     ;;
             esac
         fi
     fi
 
-    log "Partition resize complete"
+    pb_log "Partition resize complete"
 }
 
 # Run post-deployment script
 run_post_script() {
     if [ -n "${PUREBOOT_POST_SCRIPT}" ]; then
-        log "Running post-deployment script..."
+        pb_log "Running post-deployment script..."
         local script_file="/tmp/post-script.sh"
         curl -sfL "${PUREBOOT_POST_SCRIPT}" -o "${script_file}"
         chmod +x "${script_file}"
         "${script_file}"
-        log "Post-script complete"
+        pb_log "Post-script complete"
     fi
 }
 
 # Notify server of completion
 notify_complete() {
     if [ -n "${PUREBOOT_CALLBACK}" ]; then
-        log "Notifying server of completion..."
+        pb_log "Notifying server of completion..."
         curl -sf -X POST "${PUREBOOT_CALLBACK}" \
             -H "Content-Type: application/json" \
-            -d '{"success": true}' || log "Warning: Failed to notify server"
+            -d '{"success": true}' || pb_log "Warning: Failed to notify server"
     fi
 }
 
 # Main
 main() {
-    log "=== PureBoot Image Deployment ==="
+    pb_log "=== PureBoot Image Deployment ==="
 
-    parse_cmdline
     verify_params
 
-    log ""
-    log "Configuration:"
-    log "  Server:    ${PUREBOOT_SERVER:-not set}"
-    log "  Node ID:   ${PUREBOOT_NODE_ID:-not set}"
-    log "  MAC:       ${PUREBOOT_MAC:-not set}"
-    log "  Image:     ${PUREBOOT_IMAGE_URL}"
-    log "  Target:    ${PUREBOOT_TARGET}"
-    log ""
+    pb_log ""
+    pb_log "Configuration:"
+    pb_log "  Server:    ${PUREBOOT_SERVER:-not set}"
+    pb_log "  Node ID:   ${PUREBOOT_NODE_ID:-not set}"
+    pb_log "  MAC:       ${PUREBOOT_MAC:-not set}"
+    pb_log "  Image:     ${PUREBOOT_IMAGE_URL}"
+    pb_log "  Target:    ${PUREBOOT_TARGET}"
+    pb_log ""
 
     deploy_image
     resize_partitions
     run_post_script
     notify_complete
 
-    log ""
-    log "=== Deployment Complete ==="
-    log "Rebooting in 5 seconds..."
+    pb_log ""
+    pb_log "=== Deployment Complete ==="
+    pb_log "Rebooting in 5 seconds..."
     sleep 5
     reboot -f
 }
 
 main "$@"
-DEPLOY_EOF
-chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-deploy"
+IMAGE_EOF
+chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-image.sh"
 
 # Copy clone scripts
 echo "Copying clone scripts..."
