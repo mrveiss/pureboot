@@ -18,6 +18,7 @@ from src.api.routes.auth import router as auth_router
 from src.api.routes.users import router as users_router
 from src.api.routes.ws import router as ws_router
 from src.api.routes.hypervisors import router as hypervisors_router
+from src.api.middleware.auth import AuthMiddleware
 from src.db.database import init_db, close_db, async_session_factory
 from src.config import settings
 from src.pxe.tftp_server import TFTPServer
@@ -264,6 +265,9 @@ app = FastAPI(
         },
     ],
 )
+
+# Add authentication middleware
+app.add_middleware(AuthMiddleware)
 
 # Mount API routes
 app.include_router(boot.router, prefix="/api/v1", tags=["boot"])
