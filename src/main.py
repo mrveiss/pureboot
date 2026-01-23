@@ -18,6 +18,9 @@ from src.api.routes.auth import router as auth_router
 from src.api.routes.users import router as users_router
 from src.api.routes.ws import router as ws_router
 from src.api.routes.hypervisors import router as hypervisors_router
+from src.api.routes.user_groups import router as user_groups_router
+from src.api.routes.service_accounts import router as service_accounts_router
+from src.api.routes.roles import router as roles_router
 from src.api.middleware.auth import AuthMiddleware
 from src.db.database import init_db, close_db, async_session_factory
 from src.config import settings
@@ -287,6 +290,9 @@ app.include_router(auth_router, prefix="/api/v1", tags=["auth"])
 app.include_router(users_router, prefix="/api/v1", tags=["users"])
 app.include_router(ws_router, prefix="/api/v1", tags=["websocket"])
 app.include_router(hypervisors_router, prefix="/api/v1", tags=["hypervisors"])
+app.include_router(user_groups_router, prefix="/api/v1", tags=["user-groups"])
+app.include_router(service_accounts_router, prefix="/api/v1", tags=["service-accounts"])
+app.include_router(roles_router, prefix="/api/v1", tags=["roles"])
 
 # Static assets directory
 assets_dir = Path("assets")
