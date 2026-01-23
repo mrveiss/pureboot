@@ -432,3 +432,50 @@ class ApprovalVote(Base):
 
     # Relationship
     approval: Mapped["Approval"] = relationship(back_populates="votes")
+
+
+class User(Base):
+    """User account for authentication and authorization."""
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    email: Mapped[str | None] = mapped_column(String(255), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(
+        String(20), default="viewer", nullable=False
+    )  # admin, operator, approver, viewer
+
+    # Account status
+    is_active: Mapped[bool] = mapped_column(default=True)
+    failed_login_attempts: Mapped[int] = mapped_column(default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    # Tracking
+    last_login_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        default=func.now(), onupdate=func.now()
+    )
+
+
+class RefreshToken(Base):
+    """Refresh token for JWT authentication."""
+
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    # Relationship
+    user: Mapped["User"] = relationship()

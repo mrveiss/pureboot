@@ -1,6 +1,6 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { AppShell } from '@/components/layout'
-import { Dashboard, Nodes, NodeDetail, Groups, GroupDetail, Workflows, Templates, ActivityLog, Approvals, Storage, Settings, NotFound } from '@/pages'
+import { Dashboard, Nodes, NodeDetail, Groups, GroupDetail, Workflows, Templates, ActivityLog, Approvals, Users, Storage, Settings, NotFound } from '@/pages'
 
 // Authentication is not yet implemented on the backend
 // All routes are currently open access (secure with firewall)
@@ -27,7 +27,7 @@ export const router = createBrowserRouter([
       { path: 'approvals', element: <Approvals /> },
       { path: 'activity', element: <ActivityLog /> },
       { path: 'settings', element: <Settings /> },
-      { path: 'users', element: <div>Users & Roles (Coming Soon)</div> },
+      { path: 'users', element: <Users /> },
       { path: '*', element: <NotFound /> },
     ],
   },

@@ -55,6 +55,15 @@ export {
   useCancelApproval,
 } from './useApprovals'
 export {
+  userKeys,
+  useUsers,
+  useUser,
+  useCreateUser,
+  useUpdateUser,
+  useChangePassword,
+  useDeleteUser,
+} from './useUsers'
+export {
   storageKeys,
   useStorageBackends,
   useStorageBackend,
