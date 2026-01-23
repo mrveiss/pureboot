@@ -28,6 +28,7 @@ from src.config import settings
 from src.pxe.tftp_server import TFTPServer
 from src.pxe.dhcp_proxy import DHCPProxy
 from src.core.scheduler import sync_scheduler
+from src.core.escalation_job import process_escalations
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -99,6 +100,16 @@ async def lifespan(app: FastAPI):
     sync_scheduler.start()
     await _register_scheduled_jobs()
     logger.info("Scheduler started")
+
+    # Schedule escalation check job for expired approvals
+    sync_scheduler.scheduler.add_job(
+        process_escalations,
+        'interval',
+        minutes=5,
+        id='escalation_check',
+        replace_existing=True
+    )
+    logger.info("Escalation check job scheduled (every 5 minutes)")
 
     logger.info(f"PureBoot ready on http://{settings.host}:{settings.port}")
 
