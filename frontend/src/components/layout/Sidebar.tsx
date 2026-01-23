@@ -13,6 +13,9 @@ import {
   Activity,
   Settings,
   Users,
+  UsersRound,
+  Bot,
+  Shield,
 } from 'lucide-react'
 
 interface NavItemProps {
@@ -80,7 +83,10 @@ export function Sidebar({ pendingApprovals = 0 }: SidebarProps) {
         <Separator className="my-4" />
 
         <NavItem to="/settings" icon={<Settings className="h-4 w-4" />} label="Settings" />
-        <NavItem to="/users" icon={<Users className="h-4 w-4" />} label="Users & Roles" />
+        <NavItem to="/users" icon={<Users className="h-4 w-4" />} label="Users" />
+        <NavItem to="/user-groups" icon={<UsersRound className="h-4 w-4" />} label="User Groups" />
+        <NavItem to="/service-accounts" icon={<Bot className="h-4 w-4" />} label="Service Accounts" />
+        <NavItem to="/roles" icon={<Shield className="h-4 w-4" />} label="Roles" />
       </nav>
     </aside>
   )
