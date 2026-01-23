@@ -127,7 +127,7 @@ export function Templates() {
     }
     if (formData.description) payload.description = formData.description
 
-    createTemplate.mutate(payload as Parameters<typeof createTemplate.mutate>[0], {
+    createTemplate.mutate(payload as unknown as Parameters<typeof createTemplate.mutate>[0], {
       onSuccess: () => {
         setIsCreateOpen(false)
         setFormData(initialFormData)

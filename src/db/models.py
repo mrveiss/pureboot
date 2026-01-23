@@ -369,3 +369,66 @@ class Template(Base):
     updated_at: Mapped[datetime] = mapped_column(
         default=func.now(), onupdate=func.now()
     )
+
+
+class Approval(Base):
+    """Approval request for four-eye principle operations."""
+
+    __tablename__ = "approvals"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    action_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True
+    )  # bulk_wipe, bulk_retire, delete_template, etc.
+    action_data_json: Mapped[str] = mapped_column(Text, nullable=False)  # JSON
+
+    # Requester info (no auth yet, so just names/IPs)
+    requester_id: Mapped[str | None] = mapped_column(String(100))
+    requester_name: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    # Status
+    status: Mapped[str] = mapped_column(
+        String(20), default="pending", index=True
+    )  # pending, approved, rejected, expired, cancelled
+    required_approvers: Mapped[int] = mapped_column(default=2)
+
+    # Expiration
+    expires_at: Mapped[datetime] = mapped_column(nullable=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    # Relationships
+    votes: Mapped[list["ApprovalVote"]] = relationship(
+        back_populates="approval", cascade="all, delete-orphan"
+    )
+
+
+class ApprovalVote(Base):
+    """Vote on an approval request."""
+
+    __tablename__ = "approval_votes"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    approval_id: Mapped[str] = mapped_column(
+        ForeignKey("approvals.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    # Voter info
+    user_id: Mapped[str | None] = mapped_column(String(100))
+    user_name: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    # Vote
+    vote: Mapped[str] = mapped_column(String(10), nullable=False)  # approve, reject
+    comment: Mapped[str | None] = mapped_column(Text)
+
+    # Timestamp
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    # Relationship
+    approval: Mapped["Approval"] = relationship(back_populates="votes")

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Server, Clock, Cpu, HardDrive, Network, Tag, Workflow, X } from 'lucide-react'
+import { ArrowLeft, Server, Clock, Cpu, Network, Tag, Workflow, X } from 'lucide-react'
 import {
   Button,
   Card,

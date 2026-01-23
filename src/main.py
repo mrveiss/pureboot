@@ -13,6 +13,7 @@ from src.api.routes.sync_jobs import router as sync_jobs_router
 from src.api.routes.workflows import router as workflows_router
 from src.api.routes.templates import router as templates_router
 from src.api.routes.activity import router as activity_router
+from src.api.routes.approvals import router as approvals_router
 from src.db.database import init_db, close_db, async_session_factory
 from src.config import settings
 from src.pxe.tftp_server import TFTPServer
@@ -159,6 +160,7 @@ app.include_router(sync_jobs_router, prefix="/api/v1", tags=["sync-jobs"])
 app.include_router(workflows_router, prefix="/api/v1", tags=["workflows"])
 app.include_router(templates_router, prefix="/api/v1", tags=["templates"])
 app.include_router(activity_router, prefix="/api/v1", tags=["activity"])
+app.include_router(approvals_router, prefix="/api/v1", tags=["approvals"])
 
 # Static assets directory
 assets_dir = Path("assets")

@@ -74,8 +74,8 @@ function getCategoryLabel(entry: ActivityEntry): string {
     // Parse "from_state → to_state" format
     const parts = entry.category.split(' → ')
     if (parts.length === 2) {
-      const from = NODE_STATE_LABELS[parts[0]] || parts[0]
-      const to = NODE_STATE_LABELS[parts[1]] || parts[1]
+      const from = NODE_STATE_LABELS[parts[0] as keyof typeof NODE_STATE_LABELS] || parts[0]
+      const to = NODE_STATE_LABELS[parts[1] as keyof typeof NODE_STATE_LABELS] || parts[1]
       return `${from} → ${to}`
     }
     return entry.category
@@ -225,11 +225,11 @@ export function ActivityLog() {
 
                         {entry.details && Object.keys(entry.details).length > 0 && (
                           <div className="mt-2 text-xs text-muted-foreground">
-                            {entry.details.ip_address && (
+                            {entry.details.ip_address != null && (
                               <span className="mr-3">IP: {String(entry.details.ip_address)}</span>
                             )}
-                            {entry.details.progress !== undefined && (
-                              <span className="mr-3">Progress: {entry.details.progress}%</span>
+                            {entry.details.progress != null && (
+                              <span className="mr-3">Progress: {String(entry.details.progress)}%</span>
                             )}
                             {entry.triggered_by && (
                               <span>By: {entry.triggered_by}</span>
