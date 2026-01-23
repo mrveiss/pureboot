@@ -23,6 +23,7 @@ from src.api.routes.service_accounts import router as service_accounts_router
 from src.api.routes.roles import router as roles_router
 from src.api.routes.approval_rules import router as approval_rules_router
 from src.api.routes.audit import router as audit_router
+from src.api.routes.ldap import router as ldap_router
 from src.api.middleware.auth import AuthMiddleware
 from src.db.database import init_db, close_db, async_session_factory
 from src.config import settings
@@ -296,6 +297,10 @@ app = FastAPI(
             "name": "audit",
             "description": "Audit logs for security event tracking",
         },
+        {
+            "name": "ldap",
+            "description": "LDAP/AD configuration management",
+        },
     ],
 )
 
@@ -325,6 +330,7 @@ app.include_router(service_accounts_router, prefix="/api/v1", tags=["service-acc
 app.include_router(roles_router, prefix="/api/v1", tags=["roles"])
 app.include_router(approval_rules_router, prefix="/api/v1", tags=["approval-rules"])
 app.include_router(audit_router, prefix="/api/v1", tags=["audit"])
+app.include_router(ldap_router, prefix="/api/v1", tags=["ldap"])
 
 # Static assets directory
 assets_dir = Path("assets")
