@@ -5,5 +5,6 @@ export { storageBackendsApi, storageFilesApi, lunsApi, syncJobsApi } from './sto
 export { systemApi } from './system'
 export { workflowsApi } from './workflows'
 export { templatesApi } from './templates'
+export { activityApi } from './activity'
 export type { DhcpStatusResponse, DhcpRequiredSettings, DhcpStatus, DhcpIssue, ServerInfoResponse } from './system'
 export type { TemplateCreate, TemplateUpdate, TemplateFilters } from './templates'

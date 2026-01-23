@@ -40,6 +40,10 @@ export {
   useDeleteTemplate,
 } from './useTemplates'
 export {
+  activityKeys,
+  useActivity,
+} from './useActivity'
+export {
   storageKeys,
   useStorageBackends,
   useStorageBackend,

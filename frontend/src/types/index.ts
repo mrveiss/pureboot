@@ -4,6 +4,7 @@ export * from './api'
 export * from './group'
 export * from './workflow'
 export * from './template'
+export * from './activity'
 
 export type {
   StorageBackendType,
