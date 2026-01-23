@@ -164,6 +164,16 @@ async def delete_files(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/storage/backends/{backend_id}/files/delete", response_model=ApiResponse[dict])
+async def delete_files_post(
+    backend_id: str,
+    body: FileDelete,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete files - POST variant for bulk operations."""
+    return await delete_files(backend_id, body, db)
+
+
 @router.post("/storage/backends/{backend_id}/folders", response_model=ApiResponse[StorageFile])
 async def create_folder(
     backend_id: str,
