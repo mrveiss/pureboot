@@ -772,6 +772,54 @@ class AuditLog(Base):
     )
 
 
+class LdapConfig(Base):
+    """LDAP/AD server configuration."""
+
+    __tablename__ = "ldap_configs"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+
+    # Server settings
+    server_url: Mapped[str] = mapped_column(String(500), nullable=False)  # ldap://server:389 or ldaps://server:636
+    use_ssl: Mapped[bool] = mapped_column(default=False)
+    use_start_tls: Mapped[bool] = mapped_column(default=False)
+
+    # Bind credentials (for searching)
+    bind_dn: Mapped[str] = mapped_column(String(500), nullable=False)
+    bind_password_encrypted: Mapped[str] = mapped_column(String(500), nullable=False)
+
+    # Search settings
+    base_dn: Mapped[str] = mapped_column(String(500), nullable=False)
+    user_search_filter: Mapped[str] = mapped_column(
+        String(500), default="(&(objectClass=user)(sAMAccountName={username}))"
+    )
+    group_search_filter: Mapped[str] = mapped_column(
+        String(500), default="(&(objectClass=group)(member={user_dn}))"
+    )
+
+    # Attribute mappings
+    username_attribute: Mapped[str] = mapped_column(String(50), default="sAMAccountName")
+    email_attribute: Mapped[str] = mapped_column(String(50), default="mail")
+    display_name_attribute: Mapped[str] = mapped_column(String(50), default="displayName")
+    group_attribute: Mapped[str] = mapped_column(String(50), default="memberOf")
+
+    # Status
+    is_active: Mapped[bool] = mapped_column(default=True)
+    is_primary: Mapped[bool] = mapped_column(default=False)
+
+    # Sync settings
+    sync_groups: Mapped[bool] = mapped_column(default=True)
+    auto_create_users: Mapped[bool] = mapped_column(default=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(default=func.now(), onupdate=func.now())
+    last_sync_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
 class RefreshToken(Base):
     """Refresh token for JWT authentication."""
 
