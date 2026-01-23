@@ -1,7 +1,7 @@
 """User management API endpoints."""
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db.database import get_db
 from src.db.models import User, RefreshToken
 from src.api.routes.auth import hash_password, get_current_user
+from src.services.audit import audit_action
 
 router = APIRouter()
 
@@ -141,6 +142,7 @@ async def get_user(
 @router.post("/users", response_model=ApiResponse, status_code=201)
 async def create_user(
     data: UserCreate,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -185,6 +187,16 @@ async def create_user(
     await db.flush()
     await db.refresh(user)
 
+    # Audit user creation
+    await audit_action(
+        db, request,
+        action="create",
+        resource_type="user",
+        resource_id=user.id,
+        resource_name=user.username,
+        result="success",
+    )
+
     return ApiResponse(
         data=user_to_response(user),
         message="User created successfully",
@@ -195,6 +207,7 @@ async def create_user(
 async def update_user(
     user_id: str,
     data: UserUpdate,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -217,6 +230,9 @@ async def update_user(
         if data.role is not None or data.is_active is not None:
             raise HTTPException(status_code=403, detail="Only admins can change role or status")
 
+    # Track updated fields for audit
+    updated_fields = []
+
     # Update fields
     if data.email is not None:
         # Check uniqueness
@@ -227,6 +243,7 @@ async def update_user(
             if result.scalar_one_or_none():
                 raise HTTPException(status_code=400, detail="Email already exists")
         user.email = data.email or None
+        updated_fields.append("email")
 
     if is_admin:
         if data.role is not None:
@@ -244,6 +261,7 @@ async def update_user(
                 if admin_count <= 1:
                     raise HTTPException(status_code=400, detail="Cannot demote last admin")
             user.role = data.role
+            updated_fields.append("role")
 
         if data.is_active is not None:
             # Prevent disabling last admin
@@ -257,9 +275,22 @@ async def update_user(
                 if active_admin_count <= 1:
                     raise HTTPException(status_code=400, detail="Cannot disable last active admin")
             user.is_active = data.is_active
+            updated_fields.append("is_active")
 
     await db.flush()
     await db.refresh(user)
+
+    # Audit user update
+    if updated_fields:
+        await audit_action(
+            db, request,
+            action="update",
+            resource_type="user",
+            resource_id=user.id,
+            resource_name=user.username,
+            details={"updated_fields": updated_fields},
+            result="success",
+        )
 
     return ApiResponse(
         data=user_to_response(user),
@@ -318,6 +349,7 @@ async def change_password(
 @router.delete("/users/{user_id}", response_model=ApiResponse)
 async def delete_user(
     user_id: str,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -343,6 +375,9 @@ async def delete_user(
         if admin_count <= 1:
             raise HTTPException(status_code=400, detail="Cannot delete last admin")
 
+    # Store username before deletion for audit
+    deleted_username = user.username
+
     # Delete refresh tokens first (cascade should handle this, but be explicit)
     result = await db.execute(
         select(RefreshToken).where(RefreshToken.user_id == user_id)
@@ -353,5 +388,15 @@ async def delete_user(
 
     await db.delete(user)
     await db.flush()
+
+    # Audit user deletion
+    await audit_action(
+        db, request,
+        action="delete",
+        resource_type="user",
+        resource_id=user_id,
+        resource_name=deleted_username,
+        result="success",
+    )
 
     return ApiResponse(message="User deleted successfully")

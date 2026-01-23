@@ -2,7 +2,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +10,15 @@ from sqlalchemy.orm import selectinload
 
 from src.db.database import get_db
 from src.db.models import Approval, ApprovalVote
+from src.services.approvals import (
+    ApprovalNotFoundError,
+    UserCannotVoteError,
+    cancel_approval as service_cancel_approval,
+    cast_vote as service_cast_vote,
+    get_approval_with_details,
+    get_pending_approvals_for_user,
+)
+from src.services.audit import audit_action
 
 router = APIRouter()
 
@@ -30,6 +39,12 @@ class ApprovalCreate(BaseModel):
 
 class VoteCreate(BaseModel):
     """Request to vote on an approval."""
+    vote: str  # "approve" or "reject"
+    comment: str | None = None
+
+
+class LegacyVoteCreate(BaseModel):
+    """Legacy request to vote on an approval (for backwards compatibility)."""
     user_name: str
     user_id: str | None = None
     comment: str | None = None
@@ -42,6 +57,7 @@ class VoteResponse(BaseModel):
     user_name: str
     vote: str
     comment: str | None
+    is_escalation_vote: bool = False
     created_at: str
 
 
@@ -70,6 +86,7 @@ class ApprovalResponse(BaseModel):
                 user_name=v.user_name,
                 vote=v.vote,
                 comment=v.comment,
+                is_escalation_vote=v.is_escalation_vote,
                 created_at=v.created_at.isoformat() if v.created_at else "",
             )
             for v in approval.votes
@@ -105,6 +122,72 @@ class ApprovalStatsResponse(BaseModel):
     pending_count: int
 
 
+class ApprovalDetailResponse(BaseModel):
+    """Detailed approval response with additional context."""
+    id: str
+    requester_id: str | None
+    requester_username: str
+    target_type: str | None
+    target_id: str | None
+    description: str | None
+    status: str
+    operation_type: str
+    required_approvers: int
+    escalation_count: int
+    expires_at: str | None
+    votes: list[VoteResponse]
+    created_at: str
+    updated_at: str | None
+
+    @classmethod
+    def from_approval(cls, approval: Approval) -> "ApprovalDetailResponse":
+        """Create detail response from approval model."""
+        votes = [
+            VoteResponse(
+                id=v.id,
+                user_id=v.user_id,
+                user_name=v.user_name,
+                vote=v.vote,
+                comment=v.comment,
+                is_escalation_vote=v.is_escalation_vote,
+                created_at=v.created_at.isoformat() if v.created_at else "",
+            )
+            for v in approval.votes
+        ]
+
+        # Parse action_data for target info
+        try:
+            action_data = json.loads(approval.action_data_json)
+        except (json.JSONDecodeError, TypeError):
+            action_data = {}
+
+        return cls(
+            id=approval.id,
+            requester_id=approval.requester_id,
+            requester_username=approval.requester_name,
+            target_type=action_data.get("target_type"),
+            target_id=action_data.get("target_id"),
+            description=action_data.get("description"),
+            status=approval.status,
+            operation_type=approval.operation_type,
+            required_approvers=approval.required_approvers,
+            escalation_count=approval.escalation_count,
+            expires_at=approval.expires_at.isoformat() if approval.expires_at else None,
+            votes=votes,
+            created_at=approval.created_at.isoformat() if approval.created_at else "",
+            updated_at=None,  # Model doesn't have updated_at
+        )
+
+
+class VoteResultResponse(BaseModel):
+    """Response for voting on an approval."""
+    success: bool = True
+    message: str
+    vote: VoteResponse
+    is_complete: bool
+    approval_status: str
+
+
 class ApiResponse(BaseModel):
     """Generic API response."""
     success: bool = True
@@ -138,15 +221,46 @@ async def get_approval_stats(db: AsyncSession = Depends(get_db)):
 
 @router.get("/approvals", response_model=ApprovalListResponse)
 async def list_approvals(
-    status: str | None = Query(None, description="Filter by status"),
+    status: str | None = Query(None, description="Filter by status (pending, approved, rejected)"),
     requester_name: str | None = Query(None, description="Filter by requester"),
+    my_pending: bool = Query(False, description="Only show approvals awaiting my vote"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    request: Request = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """List approval requests."""
+    """List approval requests.
+
+    Args:
+        status: Filter by approval status (pending, approved, rejected, expired, cancelled)
+        requester_name: Filter by requester username
+        my_pending: If True, only show pending approvals that the current user can vote on
+        limit: Maximum number of results to return
+        offset: Number of results to skip
+    """
     # Expire old approvals first
     await _expire_old_approvals(db)
+
+    # Handle my_pending filter using service layer
+    if my_pending:
+        # Try to get user_id from request state (set by auth middleware)
+        user_id = getattr(request.state, "user_id", None) if request else None
+        if not user_id:
+            # Fallback: require authentication for this filter
+            raise HTTPException(
+                status_code=401,
+                detail="Authentication required for my_pending filter"
+            )
+
+        pending_approvals = await get_pending_approvals_for_user(db, user_id)
+        # Apply pagination
+        total = len(pending_approvals)
+        paginated = pending_approvals[offset:offset + limit]
+
+        return ApprovalListResponse(
+            data=[ApprovalResponse.from_approval(a) for a in paginated],
+            total=total,
+        )
 
     query = select(Approval).options(selectinload(Approval.votes))
 
@@ -247,6 +361,7 @@ async def create_approval(
 
     approval = Approval(
         action_type=data.action_type,
+        operation_type=data.action_type,  # Use action_type as operation_type for legacy compatibility
         action_data_json=json.dumps(data.action_data),
         requester_id=data.requester_id,
         requester_name=data.requester_name,
@@ -263,33 +378,137 @@ async def create_approval(
     )
 
 
+@router.post("/approvals/{approval_id}/vote", response_model=VoteResultResponse)
+async def vote_on_approval(
+    approval_id: str,
+    data: VoteCreate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Cast a vote on an approval request.
+
+    Uses the authenticated user from the request context. The vote type
+    (approve or reject) is specified in the request body.
+    """
+    # Validate vote type
+    if data.vote not in ("approve", "reject"):
+        raise HTTPException(
+            status_code=400,
+            detail="Vote must be 'approve' or 'reject'"
+        )
+
+    # Get current user from auth middleware
+    user_id = getattr(request.state, "user_id", None)
+    user_name = getattr(request.state, "username", None)
+
+    if not user_id or not user_name:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    try:
+        vote_obj, is_complete = await service_cast_vote(
+            db=db,
+            approval_id=approval_id,
+            user_id=user_id,
+            user_name=user_name,
+            vote=data.vote,
+            comment=data.comment,
+            is_escalation_vote=False,
+        )
+
+        # Get the updated approval for status
+        approval = await get_approval_with_details(db, approval_id)
+        approval_status = approval.status if approval else "unknown"
+
+        # Audit vote
+        await audit_action(
+            db, request,
+            action="vote",
+            resource_type="approval",
+            resource_id=approval_id,
+            details={"vote": data.vote, "comment": data.comment},
+            result="success",
+        )
+
+        return VoteResultResponse(
+            success=True,
+            message=f"Vote recorded: {data.vote}",
+            vote=VoteResponse(
+                id=vote_obj.id,
+                user_id=vote_obj.user_id,
+                user_name=vote_obj.user_name,
+                vote=vote_obj.vote,
+                comment=vote_obj.comment,
+                is_escalation_vote=vote_obj.is_escalation_vote,
+                created_at=vote_obj.created_at.isoformat() if vote_obj.created_at else "",
+            ),
+            is_complete=is_complete,
+            approval_status=approval_status,
+        )
+
+    except ApprovalNotFoundError:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    except UserCannotVoteError as e:
+        raise HTTPException(status_code=400, detail=e.reason)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/approvals/{approval_id}/approve", response_model=ApiResponse)
 async def approve_request(
     approval_id: str,
-    data: VoteCreate,
+    data: LegacyVoteCreate,
     db: AsyncSession = Depends(get_db),
 ):
-    """Vote to approve a request."""
+    """Vote to approve a request (legacy endpoint - use /vote instead)."""
     return await _cast_vote(approval_id, data, "approve", db)
 
 
 @router.post("/approvals/{approval_id}/reject", response_model=ApiResponse)
 async def reject_request(
     approval_id: str,
-    data: VoteCreate,
+    data: LegacyVoteCreate,
     db: AsyncSession = Depends(get_db),
 ):
-    """Vote to reject a request."""
+    """Vote to reject a request (legacy endpoint - use /vote instead)."""
     return await _cast_vote(approval_id, data, "reject", db)
 
 
+@router.post("/approvals/{approval_id}/cancel", response_model=ApiResponse)
+async def cancel_approval_post(
+    approval_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Cancel an approval request (requester only).
+
+    Uses authenticated user from request context. Only the requester
+    can cancel their own pending approval.
+    """
+    # Get current user from auth middleware
+    user_id = getattr(request.state, "user_id", None)
+
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    try:
+        approval = await service_cancel_approval(db, approval_id, user_id)
+        return ApiResponse(
+            data=ApprovalResponse.from_approval(approval),
+            message="Approval request cancelled",
+        )
+    except ApprovalNotFoundError:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    except UserCannotVoteError as e:
+        raise HTTPException(status_code=403, detail=e.reason)
+
+
 @router.delete("/approvals/{approval_id}", response_model=ApiResponse)
-async def cancel_approval(
+async def cancel_approval_delete(
     approval_id: str,
     requester_name: str = Query(..., description="Must match original requester"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Cancel an approval request (requester only)."""
+    """Cancel an approval request (legacy endpoint - use POST /cancel instead)."""
     result = await db.execute(
         select(Approval)
         .options(selectinload(Approval.votes))
@@ -319,11 +538,11 @@ async def cancel_approval(
 
 async def _cast_vote(
     approval_id: str,
-    data: VoteCreate,
+    data: LegacyVoteCreate,
     vote_type: str,
     db: AsyncSession,
 ) -> ApiResponse:
-    """Internal function to cast a vote."""
+    """Internal function to cast a vote (legacy implementation)."""
     result = await db.execute(
         select(Approval)
         .options(selectinload(Approval.votes))

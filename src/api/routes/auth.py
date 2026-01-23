@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.database import get_db
 from src.db.models import User, RefreshToken
+from src.services.audit import audit_action
+from src.services.ldap import ldap_service
 
 try:
     import bcrypt
@@ -183,45 +185,139 @@ async def require_role(*roles: str):
 @router.post("/auth/login", response_model=ApiResponse)
 async def login(
     data: LoginRequest,
+    request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
-    """Authenticate user and return tokens."""
-    # Find user
-    result = await db.execute(
-        select(User).where(User.username == data.username)
-    )
-    user = result.scalar_one_or_none()
+    """Authenticate user and return tokens.
 
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+    Authentication flow:
+    1. First try LDAP authentication if configured
+    2. If LDAP succeeds, find or create local user and sync groups
+    3. If LDAP fails, fall back to local authentication
+    """
+    user = None
+    auth_source = "local"
 
-    # Check if locked
-    if user.locked_until and datetime.now(timezone.utc) < user.locked_until.replace(tzinfo=timezone.utc):
-        remaining = (user.locked_until.replace(tzinfo=timezone.utc) - datetime.now(timezone.utc)).seconds // 60
-        raise HTTPException(
-            status_code=423,
-            detail=f"Account locked. Try again in {remaining} minutes."
+    # First try LDAP authentication
+    ldap_user = await ldap_service.authenticate(db, data.username, data.password)
+
+    if ldap_user:
+        auth_source = "ldap"
+        # Find existing user or create from LDAP
+        result = await db.execute(
+            select(User).where(User.username == ldap_user.username)
         )
+        user = result.scalar_one_or_none()
 
-    # Check if active
-    if not user.is_active:
-        raise HTTPException(status_code=401, detail="Account disabled")
+        if not user:
+            # Auto-create user from LDAP
+            user = User(
+                username=ldap_user.username,
+                email=ldap_user.email,
+                display_name=ldap_user.display_name,
+                password_hash="LDAP_AUTH",  # Placeholder, not used for LDAP users
+                auth_source="ldap",
+            )
+            db.add(user)
+            await db.flush()
 
-    # Verify password
-    if not verify_password(data.password, user.password_hash):
-        # Increment failed attempts
-        user.failed_login_attempts += 1
-        if user.failed_login_attempts >= MAX_FAILED_ATTEMPTS:
-            user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
+        # Sync group memberships from LDAP
+        await ldap_service.sync_user_groups(db, user, ldap_user.groups)
+
+        # Update last login
+        user.last_login_at = datetime.now(timezone.utc)
         await db.flush()
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+    else:
+        # Fall back to local authentication
+        result = await db.execute(
+            select(User).where(User.username == data.username)
+        )
+        user = result.scalar_one_or_none()
 
-    # Reset failed attempts
-    user.failed_login_attempts = 0
-    user.locked_until = None
-    user.last_login_at = datetime.now(timezone.utc)
-    await db.flush()
+        if not user:
+            # Audit failed login - user not found
+            await audit_action(
+                db, request,
+                action="login",
+                resource_type="session",
+                resource_name=data.username,
+                details={"reason": "User not found"},
+                result="failure",
+                error_message="Invalid credentials",
+            )
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+
+        # Don't allow local auth for LDAP users
+        if user.auth_source == "ldap":
+            await audit_action(
+                db, request,
+                action="login",
+                resource_type="session",
+                resource_id=user.id,
+                resource_name=user.username,
+                details={"reason": "LDAP user attempted local auth"},
+                result="failure",
+                error_message="LDAP authentication required",
+            )
+            raise HTTPException(status_code=401, detail="LDAP authentication required")
+
+        # Check if locked
+        if user.locked_until and datetime.now(timezone.utc) < user.locked_until.replace(tzinfo=timezone.utc):
+            remaining = (user.locked_until.replace(tzinfo=timezone.utc) - datetime.now(timezone.utc)).seconds // 60
+            await audit_action(
+                db, request,
+                action="login",
+                resource_type="session",
+                resource_id=user.id,
+                resource_name=user.username,
+                details={"reason": "Account locked", "remaining_minutes": remaining},
+                result="failure",
+                error_message=f"Account locked. Try again in {remaining} minutes.",
+            )
+            raise HTTPException(
+                status_code=423,
+                detail=f"Account locked. Try again in {remaining} minutes."
+            )
+
+        # Check if active
+        if not user.is_active:
+            await audit_action(
+                db, request,
+                action="login",
+                resource_type="session",
+                resource_id=user.id,
+                resource_name=user.username,
+                details={"reason": "Account disabled"},
+                result="failure",
+                error_message="Account disabled",
+            )
+            raise HTTPException(status_code=401, detail="Account disabled")
+
+        # Verify password
+        if not verify_password(data.password, user.password_hash):
+            # Increment failed attempts
+            user.failed_login_attempts += 1
+            if user.failed_login_attempts >= MAX_FAILED_ATTEMPTS:
+                user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
+            await db.flush()
+            await audit_action(
+                db, request,
+                action="login",
+                resource_type="session",
+                resource_id=user.id,
+                resource_name=user.username,
+                details={"reason": "Invalid password", "failed_attempts": user.failed_login_attempts},
+                result="failure",
+                error_message="Invalid credentials",
+            )
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+
+        # Reset failed attempts
+        user.failed_login_attempts = 0
+        user.locked_until = None
+        user.last_login_at = datetime.now(timezone.utc)
+        await db.flush()
 
     # Create tokens
     access_token, expires_in = create_access_token(user.id, user.username, user.role)
@@ -244,6 +340,17 @@ async def login(
         secure=False,  # Set to True in production with HTTPS
         samesite="lax",
         max_age=REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60,
+    )
+
+    # Audit successful login
+    await audit_action(
+        db, request,
+        action="login",
+        resource_type="session",
+        resource_id=user.id,
+        resource_name=user.username,
+        details={"auth_source": auth_source},
+        result="success",
     )
 
     return ApiResponse(

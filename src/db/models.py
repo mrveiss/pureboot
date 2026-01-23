@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import ForeignKey, Index, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -35,6 +35,9 @@ class DeviceGroup(Base):
 
     # Relationships
     nodes: Mapped[list["Node"]] = relationship(back_populates="group")
+    user_groups: Mapped[list["UserGroup"]] = relationship(
+        secondary="user_group_device_groups", back_populates="device_groups"
+    )
 
 
 class Node(Base):
@@ -90,6 +93,11 @@ class Node(Base):
     # Event log relationship
     events: Mapped[list["NodeEvent"]] = relationship(
         back_populates="node", cascade="all, delete-orphan"
+    )
+
+    # User groups with direct access to this node
+    user_groups: Mapped[list["UserGroup"]] = relationship(
+        secondary="user_group_nodes", back_populates="nodes"
     )
 
 
@@ -384,6 +392,14 @@ class Approval(Base):
     )  # bulk_wipe, bulk_retire, delete_template, etc.
     action_data_json: Mapped[str] = mapped_column(Text, nullable=False)  # JSON
 
+    # Link to approval rule that triggered this request
+    rule_id: Mapped[str | None] = mapped_column(
+        ForeignKey("approval_rules.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Operation type for policy matching (e.g., "node.provision", "workflow.execute")
+    operation_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+
     # Requester info (no auth yet, so just names/IPs)
     requester_id: Mapped[str | None] = mapped_column(String(100))
     requester_name: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -394,14 +410,22 @@ class Approval(Base):
     )  # pending, approved, rejected, expired, cancelled
     required_approvers: Mapped[int] = mapped_column(default=2)
 
+    # Escalation tracking
+    escalated_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    escalation_count: Mapped[int] = mapped_column(default=0)
+
     # Expiration
     expires_at: Mapped[datetime] = mapped_column(nullable=False)
     resolved_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    # Additional context about the request
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(default=func.now())
 
     # Relationships
+    rule: Mapped["ApprovalRule | None"] = relationship(back_populates="approvals")
     votes: Mapped[list["ApprovalVote"]] = relationship(
         back_populates="approval", cascade="all, delete-orphan"
     )
@@ -427,6 +451,9 @@ class ApprovalVote(Base):
     vote: Mapped[str] = mapped_column(String(10), nullable=False)  # approve, reject
     comment: Mapped[str | None] = mapped_column(Text)
 
+    # Whether this vote came from escalation (e.g., escalation role member)
+    is_escalation_vote: Mapped[bool] = mapped_column(default=False)
+
     # Timestamp
     created_at: Mapped[datetime] = mapped_column(default=func.now())
 
@@ -449,6 +476,28 @@ class User(Base):
         String(20), default="viewer", nullable=False
     )  # admin, operator, approver, viewer
 
+    # RBAC role reference (for new permission system)
+    role_id: Mapped[str | None] = mapped_column(
+        ForeignKey("roles.id"), nullable=True
+    )
+    role_ref: Mapped["Role | None"] = relationship()
+
+    # Service account fields
+    is_service_account: Mapped[bool] = mapped_column(default=False)
+    service_account_description: Mapped[str | None] = mapped_column(
+        String(500), nullable=True
+    )
+    owner_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    # Auth source for LDAP/AD
+    auth_source: Mapped[str] = mapped_column(
+        String(10), default="local"
+    )  # local, ldap, ad
+    ldap_dn: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
     # Account status
     is_active: Mapped[bool] = mapped_column(default=True)
     failed_login_attempts: Mapped[int] = mapped_column(default=0)
@@ -460,6 +509,315 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(
         default=func.now(), onupdate=func.now()
     )
+
+    # Relationships
+    groups: Mapped[list["UserGroup"]] = relationship(
+        secondary="user_group_members", back_populates="members"
+    )
+
+
+class Role(Base):
+    """Role definition for RBAC."""
+
+    __tablename__ = "roles"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(String(255))
+    is_system_role: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        default=func.now(), onupdate=func.now()
+    )
+
+    # Relationships
+    permissions: Mapped[list["Permission"]] = relationship(
+        secondary="role_permissions", back_populates="roles"
+    )
+    user_groups: Mapped[list["UserGroup"]] = relationship(
+        secondary="user_group_roles", back_populates="roles"
+    )
+    escalation_rules: Mapped[list["ApprovalRule"]] = relationship(
+        back_populates="escalation_role"
+    )
+
+
+class Permission(Base):
+    """Permission definition for RBAC."""
+
+    __tablename__ = "permissions"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    resource: Mapped[str] = mapped_column(String(50), nullable=False)
+    action: Mapped[str] = mapped_column(String(50), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        default=func.now(), onupdate=func.now()
+    )
+
+    # Relationships
+    roles: Mapped[list["Role"]] = relationship(
+        secondary="role_permissions", back_populates="permissions"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("resource", "action", name="uq_permission_resource_action"),
+    )
+
+
+class RolePermission(Base):
+    """Association table for roles and permissions."""
+
+    __tablename__ = "role_permissions"
+
+    role_id: Mapped[str] = mapped_column(
+        ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True
+    )
+    permission_id: Mapped[str] = mapped_column(
+        ForeignKey("permissions.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class UserGroup(Base):
+    """User group for team-based access control."""
+
+    __tablename__ = "user_groups"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500))
+    requires_approval: Mapped[bool] = mapped_column(default=False)
+    ldap_group_dn: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        default=func.now(), onupdate=func.now()
+    )
+
+    # Relationships
+    members: Mapped[list["User"]] = relationship(
+        secondary="user_group_members", back_populates="groups"
+    )
+    roles: Mapped[list["Role"]] = relationship(
+        secondary="user_group_roles", back_populates="user_groups"
+    )
+    device_groups: Mapped[list["DeviceGroup"]] = relationship(
+        secondary="user_group_device_groups", back_populates="user_groups"
+    )
+    tags: Mapped[list["UserGroupTag"]] = relationship(
+        back_populates="user_group", cascade="all, delete-orphan"
+    )
+    nodes: Mapped[list["Node"]] = relationship(
+        secondary="user_group_nodes", back_populates="user_groups"
+    )
+
+
+class UserGroupMember(Base):
+    """Association table for users and user groups."""
+
+    __tablename__ = "user_group_members"
+
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_group_id: Mapped[str] = mapped_column(
+        ForeignKey("user_groups.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+
+class UserGroupRole(Base):
+    """Association table for user groups and roles."""
+
+    __tablename__ = "user_group_roles"
+
+    user_group_id: Mapped[str] = mapped_column(
+        ForeignKey("user_groups.id", ondelete="CASCADE"), primary_key=True
+    )
+    role_id: Mapped[str] = mapped_column(
+        ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class UserGroupDeviceGroup(Base):
+    """Association table for user groups and device groups."""
+
+    __tablename__ = "user_group_device_groups"
+
+    user_group_id: Mapped[str] = mapped_column(
+        ForeignKey("user_groups.id", ondelete="CASCADE"), primary_key=True
+    )
+    device_group_id: Mapped[str] = mapped_column(
+        ForeignKey("device_groups.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class UserGroupTag(Base):
+    """Tag for categorizing user groups and defining node access by tag."""
+
+    __tablename__ = "user_group_tags"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    user_group_id: Mapped[str] = mapped_column(
+        ForeignKey("user_groups.id", ondelete="CASCADE"), nullable=False
+    )
+    tag: Mapped[str] = mapped_column(String(50), index=True, nullable=False)
+
+    # Relationships
+    user_group: Mapped["UserGroup"] = relationship(back_populates="tags")
+
+    __table_args__ = (
+        UniqueConstraint("user_group_id", "tag", name="uq_user_group_tag"),
+    )
+
+
+class UserGroupNode(Base):
+    """Association table for user groups and nodes (direct node access)."""
+
+    __tablename__ = "user_group_nodes"
+
+    user_group_id: Mapped[str] = mapped_column(
+        ForeignKey("user_groups.id", ondelete="CASCADE"), primary_key=True
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class ApprovalRule(Base):
+    """Configurable approval rule for operations requiring multi-party approval."""
+
+    __tablename__ = "approval_rules"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    scope_type: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # device_group, user_group, global
+    scope_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True
+    )  # null for global scope
+    operations_json: Mapped[str] = mapped_column(
+        Text, nullable=False
+    )  # JSON array of operation types
+    required_approvers: Mapped[int] = mapped_column(default=1)
+    escalation_timeout_hours: Mapped[int] = mapped_column(default=72)
+    escalation_role_id: Mapped[str | None] = mapped_column(
+        ForeignKey("roles.id", ondelete="SET NULL"), nullable=True
+    )
+    is_active: Mapped[bool] = mapped_column(default=True)
+    priority: Mapped[int] = mapped_column(default=0)  # Higher priority rules evaluated first
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        default=func.now(), onupdate=func.now()
+    )
+
+    # Relationships
+    escalation_role: Mapped["Role | None"] = relationship(
+        back_populates="escalation_rules"
+    )
+    approvals: Mapped[list["Approval"]] = relationship(back_populates="rule")
+
+
+class AuditLog(Base):
+    """Immutable audit trail for security-relevant events."""
+
+    __tablename__ = "audit_logs"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+
+    # When
+    timestamp: Mapped[datetime] = mapped_column(
+        default=func.now(), index=True, nullable=False
+    )
+
+    # Who
+    actor_id: Mapped[str | None] = mapped_column(String(36), nullable=True)  # User or service account ID
+    actor_type: Mapped[str] = mapped_column(String(20), nullable=False)  # user, service_account, system
+    actor_username: Mapped[str] = mapped_column(String(100), nullable=False)
+    actor_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)  # IPv4 or IPv6
+
+    # What
+    action: Mapped[str] = mapped_column(String(50), index=True, nullable=False)  # login, logout, create, update, delete, approve, reject, etc.
+    resource_type: Mapped[str] = mapped_column(String(50), index=True, nullable=False)  # node, user, role, approval, etc.
+    resource_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    resource_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+    # Details
+    details_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON with action-specific details
+
+    # Result
+    result: Mapped[str] = mapped_column(String(20), nullable=False)  # success, failure, denied
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    # Session tracking
+    session_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    auth_method: Mapped[str | None] = mapped_column(String(20), nullable=True)  # jwt, api_key, ldap
+
+    __table_args__ = (
+        Index('ix_audit_timestamp_action', 'timestamp', 'action'),
+        Index('ix_audit_actor_resource', 'actor_id', 'resource_type'),
+    )
+
+
+class LdapConfig(Base):
+    """LDAP/AD server configuration."""
+
+    __tablename__ = "ldap_configs"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+
+    # Server settings
+    server_url: Mapped[str] = mapped_column(String(500), nullable=False)  # ldap://server:389 or ldaps://server:636
+    use_ssl: Mapped[bool] = mapped_column(default=False)
+    use_start_tls: Mapped[bool] = mapped_column(default=False)
+
+    # Bind credentials (for searching)
+    bind_dn: Mapped[str] = mapped_column(String(500), nullable=False)
+    bind_password_encrypted: Mapped[str] = mapped_column(String(500), nullable=False)
+
+    # Search settings
+    base_dn: Mapped[str] = mapped_column(String(500), nullable=False)
+    user_search_filter: Mapped[str] = mapped_column(
+        String(500), default="(&(objectClass=user)(sAMAccountName={username}))"
+    )
+    group_search_filter: Mapped[str] = mapped_column(
+        String(500), default="(&(objectClass=group)(member={user_dn}))"
+    )
+
+    # Attribute mappings
+    username_attribute: Mapped[str] = mapped_column(String(50), default="sAMAccountName")
+    email_attribute: Mapped[str] = mapped_column(String(50), default="mail")
+    display_name_attribute: Mapped[str] = mapped_column(String(50), default="displayName")
+    group_attribute: Mapped[str] = mapped_column(String(50), default="memberOf")
+
+    # Status
+    is_active: Mapped[bool] = mapped_column(default=True)
+    is_primary: Mapped[bool] = mapped_column(default=False)
+
+    # Sync settings
+    sync_groups: Mapped[bool] = mapped_column(default=True)
+    auto_create_users: Mapped[bool] = mapped_column(default=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(default=func.now(), onupdate=func.now())
+    last_sync_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
 
 class RefreshToken(Base):
@@ -479,6 +837,39 @@ class RefreshToken(Base):
 
     # Relationship
     user: Mapped["User"] = relationship()
+
+
+class ApiKey(Base):
+    """API key for service account authentication."""
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    service_account_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    key_prefix: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
+    scopes_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array of scope restrictions
+    is_active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_used_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    created_by_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"), nullable=False
+    )
+
+    # Relationships
+    service_account: Mapped["User"] = relationship(foreign_keys=[service_account_id])
+    created_by: Mapped["User"] = relationship(foreign_keys=[created_by_id])
+
+    __table_args__ = (
+        UniqueConstraint("service_account_id", "name", name="uq_api_key_account_name"),
+    )
 
 
 class Hypervisor(Base):

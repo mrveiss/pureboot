@@ -18,11 +18,20 @@ from src.api.routes.auth import router as auth_router
 from src.api.routes.users import router as users_router
 from src.api.routes.ws import router as ws_router
 from src.api.routes.hypervisors import router as hypervisors_router
+from src.api.routes.user_groups import router as user_groups_router
+from src.api.routes.service_accounts import router as service_accounts_router
+from src.api.routes.roles import router as roles_router
+from src.api.routes.approval_rules import router as approval_rules_router
+from src.api.routes.audit import router as audit_router
+from src.api.routes.ldap import router as ldap_router
+from src.api.middleware.auth import AuthMiddleware
 from src.db.database import init_db, close_db, async_session_factory
 from src.config import settings
 from src.pxe.tftp_server import TFTPServer
 from src.pxe.dhcp_proxy import DHCPProxy
 from src.core.scheduler import sync_scheduler
+from src.core.escalation_job import process_escalations
+from src.services.audit import audit_service
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -45,6 +54,14 @@ async def lifespan(app: FastAPI):
     # Initialize database
     await init_db()
     logger.info("Database initialized")
+
+    # Configure audit service
+    if settings.audit.file_enabled:
+        audit_service.configure(file_path=settings.audit.file_path)
+        logger.info(f"Audit file logging enabled: {settings.audit.file_path}")
+    if settings.audit.siem_enabled and settings.audit.siem_webhook_url:
+        audit_service.configure(siem_webhook_url=settings.audit.siem_webhook_url)
+        logger.info("Audit SIEM webhook enabled")
 
     # Ensure TFTP root exists
     tftp_root = Path(settings.tftp.root)
@@ -94,6 +111,16 @@ async def lifespan(app: FastAPI):
     sync_scheduler.start()
     await _register_scheduled_jobs()
     logger.info("Scheduler started")
+
+    # Schedule escalation check job for expired approvals
+    sync_scheduler.scheduler.add_job(
+        process_escalations,
+        'interval',
+        minutes=5,
+        id='escalation_check',
+        replace_existing=True
+    )
+    logger.info("Escalation check job scheduled (every 5 minutes)")
 
     logger.info(f"PureBoot ready on http://{settings.host}:{settings.port}")
 
@@ -262,8 +289,23 @@ app = FastAPI(
             "name": "websocket",
             "description": "WebSocket endpoint for real-time updates",
         },
+        {
+            "name": "approval-rules",
+            "description": "Approval rules for configuring approval policies",
+        },
+        {
+            "name": "audit",
+            "description": "Audit logs for security event tracking",
+        },
+        {
+            "name": "ldap",
+            "description": "LDAP/AD configuration management",
+        },
     ],
 )
+
+# Add authentication middleware
+app.add_middleware(AuthMiddleware)
 
 # Mount API routes
 app.include_router(boot.router, prefix="/api/v1", tags=["boot"])
@@ -283,6 +325,12 @@ app.include_router(auth_router, prefix="/api/v1", tags=["auth"])
 app.include_router(users_router, prefix="/api/v1", tags=["users"])
 app.include_router(ws_router, prefix="/api/v1", tags=["websocket"])
 app.include_router(hypervisors_router, prefix="/api/v1", tags=["hypervisors"])
+app.include_router(user_groups_router, prefix="/api/v1", tags=["user-groups"])
+app.include_router(service_accounts_router, prefix="/api/v1", tags=["service-accounts"])
+app.include_router(roles_router, prefix="/api/v1", tags=["roles"])
+app.include_router(approval_rules_router, prefix="/api/v1", tags=["approval-rules"])
+app.include_router(audit_router, prefix="/api/v1", tags=["audit"])
+app.include_router(ldap_router, prefix="/api/v1", tags=["ldap"])
 
 # Static assets directory
 assets_dir = Path("assets")

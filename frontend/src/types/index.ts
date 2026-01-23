@@ -7,6 +7,9 @@ export * from './template'
 export * from './activity'
 export * from './approval'
 export * from './hypervisor'
+export * from './rbac'
+export * from './audit'
+export * from './ldap'
 
 export type {
   StorageBackendType,

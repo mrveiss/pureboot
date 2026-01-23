@@ -1,19 +1,20 @@
-import { createBrowserRouter, Navigate } from 'react-router-dom'
+import { createBrowserRouter } from 'react-router-dom'
 import { AppShell } from '@/components/layout'
-import { Dashboard, Nodes, NodeDetail, Groups, GroupDetail, Workflows, Templates, Hypervisors, ActivityLog, Approvals, Users, Storage, Settings, NotFound } from '@/pages'
-
-// Authentication is not yet implemented on the backend
-// All routes are currently open access (secure with firewall)
-// TODO: Re-enable ProtectedRoute when backend auth is implemented
+import { ProtectedRoute } from '@/components/ProtectedRoute'
+import { Dashboard, Nodes, NodeDetail, Groups, GroupDetail, Workflows, Templates, Hypervisors, ActivityLog, Approvals, Users, Storage, Settings, Login, NotFound, UserGroups, ServiceAccounts, Roles, ApprovalRules, AuditLogs, LdapConfig } from '@/pages'
 
 export const router = createBrowserRouter([
   {
     path: '/login',
-    element: <Navigate to="/" replace />,
+    element: <Login />,
   },
   {
     path: '/',
-    element: <AppShell />,
+    element: (
+      <ProtectedRoute>
+        <AppShell />
+      </ProtectedRoute>
+    ),
     children: [
       { index: true, element: <Dashboard /> },
       { path: 'nodes', element: <Nodes /> },
@@ -27,7 +28,62 @@ export const router = createBrowserRouter([
       { path: 'approvals', element: <Approvals /> },
       { path: 'activity', element: <ActivityLog /> },
       { path: 'settings', element: <Settings /> },
-      { path: 'users', element: <Users /> },
+      {
+        path: 'users',
+        element: (
+          <ProtectedRoute requiredRole="admin">
+            <Users />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'user-groups',
+        element: (
+          <ProtectedRoute requiredRole="admin">
+            <UserGroups />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'service-accounts',
+        element: (
+          <ProtectedRoute requiredRole="admin">
+            <ServiceAccounts />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'roles',
+        element: (
+          <ProtectedRoute requiredRole="admin">
+            <Roles />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'approval-rules',
+        element: (
+          <ProtectedRoute requiredRole="admin">
+            <ApprovalRules />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'audit-logs',
+        element: (
+          <ProtectedRoute requiredRole="admin">
+            <AuditLogs />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'ldap-config',
+        element: (
+          <ProtectedRoute requiredRole="admin">
+            <LdapConfig />
+          </ProtectedRoute>
+        ),
+      },
       { path: '*', element: <NotFound /> },
     ],
   },
