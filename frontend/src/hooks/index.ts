@@ -101,3 +101,15 @@ export {
   useHypervisorVMs,
   useHypervisorTemplates,
 } from './useHypervisors'
+export {
+  cloneSessionKeys,
+  useCloneSessions,
+  useCloneSession,
+  useCreateCloneSession,
+  useUpdateCloneSession,
+  useDeleteCloneSession,
+  useSourceReady,
+  useCloneProgress,
+  useCompleteClone,
+  useFailClone,
+} from './useCloneSessions'
