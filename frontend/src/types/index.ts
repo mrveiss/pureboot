@@ -8,6 +8,7 @@ export * from './activity'
 export * from './approval'
 export * from './hypervisor'
 export * from './clone'
+export * from './partition'
 
 export type {
   StorageBackendType,
