@@ -10,6 +10,7 @@ from src.api.schemas import (
     ApiListResponse,
     ApiResponse,
     CloneCertBundle,
+    CloneFailedRequest,
     CloneProgressUpdate,
     CloneSessionCreate,
     CloneSessionResponse,
@@ -478,7 +479,7 @@ async def clone_complete(
 @router.post("/clone-sessions/{session_id}/failed", response_model=ApiResponse[dict])
 async def clone_failed(
     session_id: str,
-    error: str = Query(..., description="Error message"),
+    data: CloneFailedRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """Mark clone session as failed."""
@@ -491,7 +492,7 @@ async def clone_failed(
         raise HTTPException(status_code=404, detail="Clone session not found")
 
     session.status = "failed"
-    session.error_message = error
+    session.error_message = data.error_message
     session.completed_at = datetime.now(timezone.utc)
 
     await db.flush()
@@ -501,13 +502,14 @@ async def clone_failed(
         "clone.failed",
         {
             "session_id": session_id,
-            "error": error,
+            "error": data.error_message,
+            "error_code": data.error_code,
         },
     )
 
     return ApiResponse(
-        data={"status": "failed"},
-        message=f"Clone failed: {error}",
+        data={"status": "failed", "error_code": data.error_code},
+        message=f"Clone failed: {data.error_message}",
     )
 
 

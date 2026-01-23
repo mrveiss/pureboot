@@ -1223,6 +1223,14 @@ class CloneCertBundle(BaseModel):
     ca_pem: str
 
 
+class CloneFailedRequest(BaseModel):
+    """Request body for marking clone session as failed."""
+
+    error_message: str
+    error_code: str | None = None
+    role: Literal["source", "target"] | None = None
+
+
 # ============== Disk and Partition Schemas ==============
 
 

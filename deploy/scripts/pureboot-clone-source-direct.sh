@@ -291,9 +291,10 @@ log "Reporting source ready to controller..."
 
 SOURCE_READY_DATA=$(cat << EOF
 {
-    "source_ip": "${LOCAL_IP}",
-    "source_port": ${LISTEN_PORT},
-    "size_bytes": ${DISK_SIZE}
+    "ip": "${LOCAL_IP}",
+    "port": ${LISTEN_PORT},
+    "size_bytes": ${DISK_SIZE},
+    "device": "${PUREBOOT_DEVICE}"
 }
 EOF
 )

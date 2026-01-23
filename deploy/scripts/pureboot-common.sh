@@ -314,8 +314,6 @@ api_post_resilient() {
 fetch_certs() {
     local role="$1"
     local cert_dir="${2:-/tmp/pureboot-certs}"
-    local endpoint="/api/v1/clone/certs"
-
     if [[ -z "${PUREBOOT_SERVER}" ]]; then
         log_error "PUREBOOT_SERVER not set, cannot fetch certificates"
         return 1
@@ -328,7 +326,7 @@ fetch_certs() {
 
     mkdir -p "${cert_dir}"
 
-    local url="${PUREBOOT_SERVER}${endpoint}?session_id=${PUREBOOT_SESSION_ID}&role=${role}"
+    local url="${PUREBOOT_SERVER}/api/v1/clone-sessions/${PUREBOOT_SESSION_ID}/certs?role=${role}"
     log "Fetching TLS certificates for role: ${role}"
 
     # Fetch certificate bundle
@@ -346,9 +344,9 @@ fetch_certs() {
     # Parse and save certificates from JSON response
     local cert key ca
 
-    cert=$(echo "${response}" | jq -r '.cert // empty' 2>/dev/null)
-    key=$(echo "${response}" | jq -r '.key // empty' 2>/dev/null)
-    ca=$(echo "${response}" | jq -r '.ca // empty' 2>/dev/null)
+    cert=$(echo "${response}" | jq -r '.cert_pem // empty' 2>/dev/null)
+    key=$(echo "${response}" | jq -r '.key_pem // empty' 2>/dev/null)
+    ca=$(echo "${response}" | jq -r '.ca_pem // empty' 2>/dev/null)
 
     if [[ -z "${cert}" || -z "${key}" || -z "${ca}" ]]; then
         log_error "Invalid certificate response from controller"
