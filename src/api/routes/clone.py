@@ -304,7 +304,15 @@ async def clone_source_ready(
     request: CloneSourceReady,
     db: AsyncSession = Depends(get_db),
 ):
-    """Called by source node when ready to serve disk."""
+    """
+    Called by source node when ready to serve disk.
+
+    This endpoint:
+    1. Records source IP, port, and disk size from the request
+    2. Updates session status to "source_ready"
+    3. Broadcasts "clone.source_ready" WebSocket event
+    4. For direct mode with target assigned: auto-triggers target node boot
+    """
     result = await db.execute(
         select(CloneSession)
         .options(
@@ -318,12 +326,34 @@ async def clone_source_ready(
     if not session:
         raise HTTPException(status_code=404, detail="Clone session not found")
 
-    # Update session
+    # Update session with source info
     session.status = "source_ready"
     session.source_ip = request.ip
     session.source_port = request.port
     session.bytes_total = request.size_bytes
-    session.started_at = datetime.now(timezone.utc)
+    # Only set started_at if not already set (start endpoint may have set it)
+    if not session.started_at:
+        session.started_at = datetime.now(timezone.utc)
+
+    # For direct mode: auto-trigger target node boot if target is assigned
+    target_boot_triggered = False
+    if session.clone_mode == "direct" and session.target_node_id:
+        target_node = session.target_node
+        if target_node:
+            # Set clone workflow for target node
+            # Format: clone-target:<session_id>:<device>:<source_ip>:<source_port>
+            # This allows the boot endpoint to look up session and connect params
+            target_node.workflow_id = (
+                f"clone-target:{session.id}:{session.target_device}:"
+                f"{request.ip}:{request.port}"
+            )
+
+            # Transition to pending state so node will boot into clone mode
+            if target_node.state in ("discovered", "active", "installed"):
+                target_node.state = "pending"
+                target_node.state_changed_at = datetime.now(timezone.utc)
+
+            target_boot_triggered = True
 
     await db.flush()
 
@@ -335,12 +365,25 @@ async def clone_source_ready(
             "source_ip": request.ip,
             "source_port": request.port,
             "size_bytes": request.size_bytes,
+            "target_boot_triggered": target_boot_triggered,
         },
     )
 
+    # Build response message
+    if target_boot_triggered:
+        message = (
+            f"Source ready at {request.ip}:{request.port}. "
+            "Target node configured for clone boot - reboot target to begin transfer."
+        )
+    else:
+        message = f"Source ready at {request.ip}:{request.port}"
+
     return ApiResponse(
-        data={"status": "source_ready"},
-        message=f"Source ready at {request.ip}:{request.port}",
+        data={
+            "status": "source_ready",
+            "target_boot_triggered": target_boot_triggered,
+        },
+        message=message,
     )
 
 
