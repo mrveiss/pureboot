@@ -1,0 +1,20 @@
+# Clone Target Workflow
+# Receives disk image from a clone source node
+id: clone-target
+name: Clone Target (Receive Disk)
+description: Boot into deploy environment to receive disk clone from source node
+
+# Install method: image - will stream disk from source and write to target
+install_method: image
+
+# The image_url will be dynamically set based on which source is ready
+# Format: http://<source-ip>:8080/disk (served by clone source)
+# For now, use placeholder - operator sets this when starting clone
+image_url: "http://CLONE_SOURCE_IP:8080/disk"
+
+# Target device to write the cloned disk to
+target_device: /dev/sda
+
+# Architecture and boot mode
+architecture: x86_64
+boot_mode: uefi
