@@ -479,3 +479,40 @@ class RefreshToken(Base):
 
     # Relationship
     user: Mapped["User"] = relationship()
+
+
+class Hypervisor(Base):
+    """Hypervisor connection for VM management (oVirt, Proxmox)."""
+
+    __tablename__ = "hypervisors"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    type: Mapped[str] = mapped_column(
+        String(20), nullable=False, index=True
+    )  # ovirt, proxmox
+
+    # Connection details
+    api_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    username: Mapped[str | None] = mapped_column(String(100))
+    password_encrypted: Mapped[str | None] = mapped_column(Text)  # Encrypted password
+    verify_ssl: Mapped[bool] = mapped_column(default=True)
+
+    # Status
+    status: Mapped[str] = mapped_column(
+        String(20), default="unknown", index=True
+    )  # online, offline, error, unknown
+    last_error: Mapped[str | None] = mapped_column(Text)
+    last_sync_at: Mapped[datetime | None] = mapped_column()
+
+    # Cached stats
+    vm_count: Mapped[int] = mapped_column(default=0)
+    host_count: Mapped[int] = mapped_column(default=0)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        default=func.now(), onupdate=func.now()
+    )

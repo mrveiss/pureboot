@@ -17,6 +17,7 @@ from src.api.routes.approvals import router as approvals_router
 from src.api.routes.auth import router as auth_router
 from src.api.routes.users import router as users_router
 from src.api.routes.ws import router as ws_router
+from src.api.routes.hypervisors import router as hypervisors_router
 from src.db.database import init_db, close_db, async_session_factory
 from src.config import settings
 from src.pxe.tftp_server import TFTPServer
@@ -281,6 +282,7 @@ app.include_router(approvals_router, prefix="/api/v1", tags=["approvals"])
 app.include_router(auth_router, prefix="/api/v1", tags=["auth"])
 app.include_router(users_router, prefix="/api/v1", tags=["users"])
 app.include_router(ws_router, prefix="/api/v1", tags=["websocket"])
+app.include_router(hypervisors_router, prefix="/api/v1", tags=["hypervisors"])
 
 # Static assets directory
 assets_dir = Path("assets")

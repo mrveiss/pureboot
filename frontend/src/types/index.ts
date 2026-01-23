@@ -6,6 +6,7 @@ export * from './workflow'
 export * from './template'
 export * from './activity'
 export * from './approval'
+export * from './hypervisor'
 
 export type {
   StorageBackendType,

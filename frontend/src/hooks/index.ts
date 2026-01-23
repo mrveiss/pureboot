@@ -90,3 +90,14 @@ export {
   useDeleteSyncJob,
   useRunSyncJob,
 } from './useStorage'
+export {
+  hypervisorKeys,
+  useHypervisors,
+  useHypervisor,
+  useCreateHypervisor,
+  useUpdateHypervisor,
+  useDeleteHypervisor,
+  useTestHypervisor,
+  useHypervisorVMs,
+  useHypervisorTemplates,
+} from './useHypervisors'
