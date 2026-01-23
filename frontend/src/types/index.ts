@@ -7,6 +7,7 @@ export * from './template'
 export * from './activity'
 export * from './approval'
 export * from './hypervisor'
+export * from './clone'
 
 export type {
   StorageBackendType,
