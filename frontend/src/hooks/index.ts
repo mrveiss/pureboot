@@ -6,6 +6,7 @@ export {
   useNodeStats,
   useUpdateNodeState,
   useUpdateNode,
+  useCreateNode,
   nodeKeys,
 } from './useNodes'
 export { useNodeUpdates } from './useNodeUpdates'

@@ -64,3 +64,15 @@ export function useUpdateNode() {
     },
   })
 }
+
+export function useCreateNode() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (data: Partial<Node>) => nodesApi.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: nodeKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: nodeKeys.stats() })
+    },
+  })
+}

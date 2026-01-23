@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { Card, CardContent, CardHeader, Button } from '@/components/ui'
 import { Plus, RefreshCw } from 'lucide-react'
-import { NodeTable, BulkActionBar } from '@/components/nodes'
+import { NodeTable, BulkActionBar, RegisterNodeDialog } from '@/components/nodes'
 import { useNodes } from '@/hooks'
 import type { NodeState } from '@/types'
 
 export function Nodes() {
   const [stateFilter, setStateFilter] = useState<NodeState | null>(null)
+  const [registerDialogOpen, setRegisterDialogOpen] = useState(false)
 
   const { data: response, isLoading, refetch, isFetching } = useNodes(
     stateFilter ? { state: stateFilter, limit: 1000 } : { limit: 1000 }
@@ -27,7 +28,7 @@ export function Nodes() {
           >
             <RefreshCw className={isFetching ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
           </Button>
-          <Button disabled>
+          <Button onClick={() => setRegisterDialogOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
             Register Node
           </Button>
@@ -48,6 +49,11 @@ export function Nodes() {
       </Card>
 
       <BulkActionBar />
+
+      <RegisterNodeDialog
+        open={registerDialogOpen}
+        onOpenChange={setRegisterDialogOpen}
+      />
     </div>
   )
 }
