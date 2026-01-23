@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { AuthTokens, User, LoginCredentials, UserApiResponse } from '@/types'
+import type { AuthTokens, User, LoginCredentials } from '@/types'
 
 // Response wrapper from backend
 interface AuthResponse {
