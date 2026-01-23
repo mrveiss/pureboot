@@ -35,6 +35,9 @@ class DeviceGroup(Base):
 
     # Relationships
     nodes: Mapped[list["Node"]] = relationship(back_populates="group")
+    user_groups: Mapped[list["UserGroup"]] = relationship(
+        secondary="user_group_device_groups", back_populates="device_groups"
+    )
 
 
 class Node(Base):
@@ -90,6 +93,11 @@ class Node(Base):
     # Event log relationship
     events: Mapped[list["NodeEvent"]] = relationship(
         back_populates="node", cascade="all, delete-orphan"
+    )
+
+    # User groups with direct access to this node
+    user_groups: Mapped[list["UserGroup"]] = relationship(
+        secondary="user_group_nodes", back_populates="nodes"
     )
 
 
@@ -455,6 +463,22 @@ class User(Base):
     )
     role_ref: Mapped["Role | None"] = relationship()
 
+    # Service account fields
+    is_service_account: Mapped[bool] = mapped_column(default=False)
+    service_account_description: Mapped[str | None] = mapped_column(
+        String(500), nullable=True
+    )
+    owner_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    # Auth source for LDAP/AD
+    auth_source: Mapped[str] = mapped_column(
+        String(10), default="local"
+    )  # local, ldap, ad
+    ldap_dn: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
     # Account status
     is_active: Mapped[bool] = mapped_column(default=True)
     failed_login_attempts: Mapped[int] = mapped_column(default=0)
@@ -465,6 +489,11 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         default=func.now(), onupdate=func.now()
+    )
+
+    # Relationships
+    groups: Mapped[list["UserGroup"]] = relationship(
+        secondary="user_group_members", back_populates="members"
     )
 
 
@@ -487,6 +516,9 @@ class Role(Base):
     # Relationships
     permissions: Mapped[list["Permission"]] = relationship(
         secondary="role_permissions", back_populates="roles"
+    )
+    user_groups: Mapped[list["UserGroup"]] = relationship(
+        secondary="user_group_roles", back_populates="roles"
     )
 
 
@@ -526,6 +558,115 @@ class RolePermission(Base):
     )
     permission_id: Mapped[str] = mapped_column(
         ForeignKey("permissions.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class UserGroup(Base):
+    """User group for team-based access control."""
+
+    __tablename__ = "user_groups"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500))
+    requires_approval: Mapped[bool] = mapped_column(default=False)
+    ldap_group_dn: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        default=func.now(), onupdate=func.now()
+    )
+
+    # Relationships
+    members: Mapped[list["User"]] = relationship(
+        secondary="user_group_members", back_populates="groups"
+    )
+    roles: Mapped[list["Role"]] = relationship(
+        secondary="user_group_roles", back_populates="user_groups"
+    )
+    device_groups: Mapped[list["DeviceGroup"]] = relationship(
+        secondary="user_group_device_groups", back_populates="user_groups"
+    )
+    tags: Mapped[list["UserGroupTag"]] = relationship(
+        back_populates="user_group", cascade="all, delete-orphan"
+    )
+    nodes: Mapped[list["Node"]] = relationship(
+        secondary="user_group_nodes", back_populates="user_groups"
+    )
+
+
+class UserGroupMember(Base):
+    """Association table for users and user groups."""
+
+    __tablename__ = "user_group_members"
+
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_group_id: Mapped[str] = mapped_column(
+        ForeignKey("user_groups.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+
+class UserGroupRole(Base):
+    """Association table for user groups and roles."""
+
+    __tablename__ = "user_group_roles"
+
+    user_group_id: Mapped[str] = mapped_column(
+        ForeignKey("user_groups.id", ondelete="CASCADE"), primary_key=True
+    )
+    role_id: Mapped[str] = mapped_column(
+        ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class UserGroupDeviceGroup(Base):
+    """Association table for user groups and device groups."""
+
+    __tablename__ = "user_group_device_groups"
+
+    user_group_id: Mapped[str] = mapped_column(
+        ForeignKey("user_groups.id", ondelete="CASCADE"), primary_key=True
+    )
+    device_group_id: Mapped[str] = mapped_column(
+        ForeignKey("device_groups.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class UserGroupTag(Base):
+    """Tag for categorizing user groups and defining node access by tag."""
+
+    __tablename__ = "user_group_tags"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    user_group_id: Mapped[str] = mapped_column(
+        ForeignKey("user_groups.id", ondelete="CASCADE"), nullable=False
+    )
+    tag: Mapped[str] = mapped_column(String(50), index=True, nullable=False)
+
+    # Relationships
+    user_group: Mapped["UserGroup"] = relationship(back_populates="tags")
+
+    __table_args__ = (
+        UniqueConstraint("user_group_id", "tag", name="uq_user_group_tag"),
+    )
+
+
+class UserGroupNode(Base):
+    """Association table for user groups and nodes (direct node access)."""
+
+    __tablename__ = "user_group_nodes"
+
+    user_group_id: Mapped[str] = mapped_column(
+        ForeignKey("user_groups.id", ondelete="CASCADE"), primary_key=True
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), primary_key=True
     )
 
 
