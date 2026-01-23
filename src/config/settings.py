@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     port: int = 8080
     debug: bool = False
 
+    # Secret key for encryption (MUST be set in production)
+    secret_key: str = "CHANGE_ME_IN_PRODUCTION_32_CHARS!"
+
     # Workflow definitions directory
     workflows_dir: Path = Path("/var/lib/pureboot/workflows")
 
