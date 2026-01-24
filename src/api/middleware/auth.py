@@ -34,6 +34,22 @@ PUBLIC_PREFIXES = (
     "/api/v1/ipxe/",
 )
 
+# File extensions that don't require authentication (static assets)
+PUBLIC_EXTENSIONS = (
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".ico",
+    ".css",
+    ".js",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".eot",
+)
+
 
 def is_public_path(path: str) -> bool:
     """Check if path is public (no auth required)."""
@@ -41,6 +57,10 @@ def is_public_path(path: str) -> bool:
         return True
     for prefix in PUBLIC_PREFIXES:
         if path.startswith(prefix):
+            return True
+    # Allow static assets by extension
+    for ext in PUBLIC_EXTENSIONS:
+        if path.endswith(ext):
             return True
     return False
 
