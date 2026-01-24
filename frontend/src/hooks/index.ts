@@ -114,3 +114,14 @@ export {
   useFailClone,
 } from './useCloneSessions'
 export { useCloneUpdates } from './useCloneUpdates'
+export {
+  diskKeys,
+  useNodeDisks,
+  useNodeDisk,
+  useTriggerDiskScan,
+  usePartitionOperations,
+  useQueueOperation,
+  useRemoveOperation,
+  useApplyOperations,
+} from './useDisks'
+export { usePartitionUpdates } from './usePartitionUpdates'
