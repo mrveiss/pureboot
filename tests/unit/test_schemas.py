@@ -148,3 +148,31 @@ class TestNodeReport:
         """MAC address normalized."""
         report = NodeReport(mac_address="00-11-22-AA-BB-CC")
         assert report.mac_address == "00:11:22:aa:bb:cc"
+
+
+class TestPiNodeSchemas:
+    """Test Pi-specific node schema fields."""
+
+    def test_node_create_with_pi_model(self):
+        """NodeCreate accepts pi_model field."""
+        node = NodeCreate(
+            mac_address="dc:a6:32:12:34:56",
+            arch="aarch64",
+            boot_mode="pi",
+            serial_number="d83add36",
+            pi_model="pi4",
+        )
+        assert node.pi_model == "pi4"
+
+    def test_pi_model_validation(self):
+        """pi_model must be valid Pi model identifier."""
+        node = NodeCreate(
+            mac_address="dc:a6:32:12:34:56",
+            pi_model="pi4",
+        )
+        assert node.pi_model == "pi4"
+
+    def test_pi_model_optional(self):
+        """pi_model is optional."""
+        node = NodeCreate(mac_address="dc:a6:32:12:34:56")
+        assert node.pi_model is None
