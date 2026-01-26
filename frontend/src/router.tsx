@@ -1,6 +1,6 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { AppShell } from '@/components/layout'
-import { Dashboard, Nodes, NodeDetail, Groups, GroupDetail, Workflows, Templates, Hypervisors, ActivityLog, Approvals, Users, Storage, CloneSessions, CloneDetail, PartitionTool, Settings, NotFound } from '@/pages'
+import { Dashboard, Nodes, NodeDetail, Groups, GroupDetail, Workflows, Templates, Hypervisors, ActivityLog, Approvals, Users, Storage, CloneSessions, CloneDetail, CloneWizard, PartitionTool, Settings, NotFound } from '@/pages'
 
 // Authentication is not yet implemented on the backend
 // All routes are currently open access (secure with firewall)
@@ -26,6 +26,7 @@ export const router = createBrowserRouter([
       { path: 'hypervisors', element: <Hypervisors /> },
       { path: 'storage', element: <Storage /> },
       { path: 'clone', element: <CloneSessions /> },
+      { path: 'clone/new', element: <CloneWizard /> },
       { path: 'clone/:id', element: <CloneDetail /> },
       { path: 'approvals', element: <Approvals /> },
       { path: 'activity', element: <ActivityLog /> },
