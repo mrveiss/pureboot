@@ -1311,6 +1311,42 @@ class DiskInfoResponse(BaseModel):
         )
 
 
+# ============== Resize Plan Schemas ==============
+
+
+class PartitionPlanItem(BaseModel):
+    """Single partition in a resize plan."""
+
+    partition: int
+    current_size_bytes: int
+    new_size_bytes: int
+    filesystem: str | None = None
+    action: Literal["keep", "shrink", "grow", "delete"] = "keep"
+    min_size_bytes: int | None = None
+    can_resize: bool = True
+
+
+class ResizePlan(BaseModel):
+    """Plan for resizing partitions during clone."""
+
+    source_disk_bytes: int
+    target_disk_bytes: int
+    resize_mode: Literal["none", "shrink_source", "grow_target"]
+    partitions: list[PartitionPlanItem]
+    feasible: bool = True
+    error_message: str | None = None
+
+
+class CloneAnalysisResponse(BaseModel):
+    """Response from clone analysis."""
+
+    source_disk: dict | None = None  # Disk info
+    target_disk: dict | None = None  # Disk info
+    size_difference_bytes: int
+    resize_needed: bool
+    suggested_plan: ResizePlan | None = None
+
+
 class PartitionOperationCreate(BaseModel):
     """Schema for creating a partition operation."""
 

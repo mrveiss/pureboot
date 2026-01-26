@@ -1,4 +1,5 @@
 """Clone session API routes."""
+import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from src.api.schemas import (
     ApiListResponse,
     ApiResponse,
+    CloneAnalysisResponse,
     CloneCertBundle,
     CloneFailedRequest,
     CloneProgressUpdate,
@@ -16,11 +18,14 @@ from src.api.schemas import (
     CloneSessionResponse,
     CloneSessionUpdate,
     CloneSourceReady,
+    DiskInfoResponse,
+    PartitionPlanItem,
+    ResizePlan,
 )
 from src.core.ca import ca_service
 from src.core.websocket import global_ws_manager
 from src.db.database import get_db
-from src.db.models import CloneSession, Node, StorageBackend
+from src.db.models import CloneSession, DiskInfo, Node, StorageBackend
 
 router = APIRouter(tags=["Clone Sessions"])
 
@@ -613,4 +618,271 @@ async def start_clone_session(
             "message": "Source node configured for clone boot. Reboot source node to begin.",
         },
         message="Clone session started. Reboot source node to begin cloning.",
+    )
+
+
+def _generate_resize_plan(
+    source_disk: DiskInfo,
+    target_disk: DiskInfo | None,
+    resize_mode: str,
+) -> ResizePlan:
+    """
+    Generate a resize plan based on source/target disk sizes.
+
+    Args:
+        source_disk: Source disk info with partition data
+        target_disk: Target disk info (may be None if not yet assigned)
+        resize_mode: Current resize mode setting
+
+    Returns:
+        ResizePlan with partition adjustments
+    """
+    source_size = source_disk.size_bytes
+    target_size = target_disk.size_bytes if target_disk else source_size
+
+    # Parse source partitions
+    partitions = []
+    if source_disk.partitions_json:
+        try:
+            partition_data = json.loads(source_disk.partitions_json)
+            for p in partition_data:
+                partitions.append(
+                    PartitionPlanItem(
+                        partition=p.get("number", 0),
+                        current_size_bytes=p.get("size_bytes", 0),
+                        new_size_bytes=p.get("size_bytes", 0),  # Default: keep same
+                        filesystem=p.get("filesystem"),
+                        action="keep",
+                        min_size_bytes=p.get("min_size_bytes"),
+                        can_resize=p.get("can_shrink", False),
+                    )
+                )
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Determine if resize is needed
+    if target_size >= source_size:
+        # Target is same or larger - no shrinking needed
+        # Could grow partitions if resize_mode is grow_target
+        if resize_mode == "grow_target" and target_size > source_size:
+            # Find the last resizable partition and grow it
+            extra_space = target_size - source_size
+            for p in reversed(partitions):
+                if p.can_resize and p.filesystem in ("ext4", "xfs", "btrfs", "ntfs"):
+                    p.new_size_bytes = p.current_size_bytes + extra_space
+                    p.action = "grow"
+                    break
+
+        return ResizePlan(
+            source_disk_bytes=source_size,
+            target_disk_bytes=target_size,
+            resize_mode=resize_mode,
+            partitions=partitions,
+            feasible=True,
+        )
+
+    # Target is smaller - need to shrink
+    size_to_reduce = source_size - target_size
+
+    # Check if shrinking is feasible
+    total_shrinkable = 0
+    for p in partitions:
+        if p.can_resize and p.min_size_bytes is not None:
+            shrink_potential = p.current_size_bytes - p.min_size_bytes
+            if shrink_potential > 0:
+                total_shrinkable += shrink_potential
+
+    if total_shrinkable < size_to_reduce:
+        return ResizePlan(
+            source_disk_bytes=source_size,
+            target_disk_bytes=target_size,
+            resize_mode="shrink_source",
+            partitions=partitions,
+            feasible=False,
+            error_message=(
+                f"Cannot shrink partitions enough. Need to reduce {size_to_reduce} bytes "
+                f"but only {total_shrinkable} bytes available for shrinking."
+            ),
+        )
+
+    # Distribute shrinkage across partitions (proportionally)
+    remaining_to_shrink = size_to_reduce
+    for p in reversed(partitions):  # Start from last partition
+        if remaining_to_shrink <= 0:
+            break
+        if p.can_resize and p.min_size_bytes is not None:
+            shrink_potential = p.current_size_bytes - p.min_size_bytes
+            if shrink_potential > 0:
+                shrink_amount = min(shrink_potential, remaining_to_shrink)
+                p.new_size_bytes = p.current_size_bytes - shrink_amount
+                p.action = "shrink"
+                remaining_to_shrink -= shrink_amount
+
+    return ResizePlan(
+        source_disk_bytes=source_size,
+        target_disk_bytes=target_size,
+        resize_mode="shrink_source",
+        partitions=partitions,
+        feasible=True,
+    )
+
+
+@router.post(
+    "/clone-sessions/{session_id}/analyze",
+    response_model=ApiResponse[CloneAnalysisResponse],
+)
+async def analyze_clone_session(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Analyze source and target disks to determine if resize is needed.
+
+    Compares disk sizes and generates a suggested resize plan if
+    source disk is larger than target.
+    """
+    # Load session with relationships
+    result = await db.execute(
+        select(CloneSession)
+        .options(
+            selectinload(CloneSession.source_node),
+            selectinload(CloneSession.target_node),
+        )
+        .where(CloneSession.id == session_id)
+    )
+    session = result.scalar_one_or_none()
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Clone session not found")
+
+    # Get source disk info
+    result = await db.execute(
+        select(DiskInfo).where(
+            DiskInfo.node_id == session.source_node_id,
+            DiskInfo.device == session.source_device,
+        )
+    )
+    source_disk = result.scalar_one_or_none()
+
+    if not source_disk:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No disk info found for source node device {session.source_device}. "
+            "Run disk scan on source node first.",
+        )
+
+    # Get target disk info if target is assigned
+    target_disk = None
+    if session.target_node_id:
+        result = await db.execute(
+            select(DiskInfo).where(
+                DiskInfo.node_id == session.target_node_id,
+                DiskInfo.device == session.target_device,
+            )
+        )
+        target_disk = result.scalar_one_or_none()
+
+    # Calculate size difference
+    source_size = source_disk.size_bytes
+    target_size = target_disk.size_bytes if target_disk else source_size
+    size_difference = source_size - target_size
+    resize_needed = size_difference > 0
+
+    # Generate suggested plan
+    suggested_plan = _generate_resize_plan(
+        source_disk, target_disk, session.resize_mode
+    )
+
+    # Build disk info dicts for response
+    source_disk_dict = DiskInfoResponse.from_disk_info(source_disk).model_dump()
+    target_disk_dict = (
+        DiskInfoResponse.from_disk_info(target_disk).model_dump()
+        if target_disk
+        else None
+    )
+
+    return ApiResponse(
+        data=CloneAnalysisResponse(
+            source_disk=source_disk_dict,
+            target_disk=target_disk_dict,
+            size_difference_bytes=size_difference,
+            resize_needed=resize_needed,
+            suggested_plan=suggested_plan,
+        ),
+        message="Clone analysis complete",
+    )
+
+
+@router.get(
+    "/clone-sessions/{session_id}/plan",
+    response_model=ApiResponse[ResizePlan | None],
+)
+async def get_resize_plan(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the current resize plan for a clone session."""
+    result = await db.execute(
+        select(CloneSession).where(CloneSession.id == session_id)
+    )
+    session = result.scalar_one_or_none()
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Clone session not found")
+
+    # Parse stored plan if exists
+    if session.partition_plan_json:
+        try:
+            plan_data = json.loads(session.partition_plan_json)
+            plan = ResizePlan(**plan_data)
+            return ApiResponse(data=plan)
+        except (json.JSONDecodeError, TypeError, ValueError) as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error parsing stored resize plan: {e}",
+            )
+
+    return ApiResponse(data=None, message="No resize plan configured")
+
+
+@router.put(
+    "/clone-sessions/{session_id}/plan",
+    response_model=ApiResponse[ResizePlan],
+)
+async def update_resize_plan(
+    session_id: str,
+    plan: ResizePlan,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update the resize plan for a clone session."""
+    result = await db.execute(
+        select(CloneSession).where(CloneSession.id == session_id)
+    )
+    session = result.scalar_one_or_none()
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Clone session not found")
+
+    if session.status not in ("pending", "source_ready"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot update plan for session in '{session.status}' status",
+        )
+
+    # Validate plan feasibility
+    if not plan.feasible:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot save infeasible plan: {plan.error_message}",
+        )
+
+    # Store plan as JSON
+    session.partition_plan_json = plan.model_dump_json()
+    session.resize_mode = plan.resize_mode
+
+    await db.flush()
+
+    return ApiResponse(
+        data=plan,
+        message="Resize plan updated successfully",
     )
