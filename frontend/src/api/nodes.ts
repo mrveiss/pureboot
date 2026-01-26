@@ -39,7 +39,7 @@ export const nodesApi = {
 
   async updateState(nodeId: string, newState: string): Promise<ApiResponse<Node>> {
     return apiClient.patch<ApiResponse<Node>>(`/nodes/${nodeId}/state`, {
-      new_state: newState
+      state: newState
     })
   },
 
