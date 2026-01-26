@@ -64,6 +64,8 @@ class TestNodeStateMachine:
         assert "reprovision" in valid
         assert "deprovisioning" in valid
         assert "migrating" in valid
+        assert "serving_source" in valid
+        assert "cloning_target" in valid
         assert "retired" in valid
 
     def test_installing_to_install_failed_allowed(self):
@@ -79,6 +81,38 @@ class TestNodeStateMachine:
         expected = {
             "discovered", "pending", "installing", "installed",
             "active", "reprovision", "deprovisioning", "migrating",
-            "install_failed", "retired"
+            "install_failed", "serving_source", "cloning_target", "retired"
         }
         assert set(NodeStateMachine.STATES) == expected
+
+    # Cloning state transitions
+
+    def test_active_to_serving_source_allowed(self):
+        """Can transition from active to serving_source for disk cloning."""
+        assert NodeStateMachine.can_transition("active", "serving_source") is True
+
+    def test_active_to_cloning_target_allowed(self):
+        """Can transition from active to cloning_target for disk cloning."""
+        assert NodeStateMachine.can_transition("active", "cloning_target") is True
+
+    def test_discovered_to_cloning_target_allowed(self):
+        """Can transition from discovered to cloning_target for new node cloning."""
+        assert NodeStateMachine.can_transition("discovered", "cloning_target") is True
+
+    def test_serving_source_to_active_allowed(self):
+        """Can transition from serving_source back to active after clone completes."""
+        assert NodeStateMachine.can_transition("serving_source", "active") is True
+
+    def test_cloning_target_to_installed_allowed(self):
+        """Can transition from cloning_target to installed after clone completes."""
+        assert NodeStateMachine.can_transition("cloning_target", "installed") is True
+
+    def test_serving_source_cannot_skip_to_retired(self):
+        """serving_source can retire (admin override) but not skip to other states."""
+        assert NodeStateMachine.can_transition("serving_source", "pending") is False
+        assert NodeStateMachine.can_transition("serving_source", "retired") is True
+
+    def test_cloning_target_cannot_skip_states(self):
+        """cloning_target must go to installed, not skip to active."""
+        assert NodeStateMachine.can_transition("cloning_target", "active") is False
+        assert NodeStateMachine.can_transition("cloning_target", "retired") is True

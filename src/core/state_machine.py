@@ -26,6 +26,8 @@ class NodeStateMachine:
         reprovision: Marked for reinstallation
         deprovisioning: Secure data erasure in progress
         migrating: Hardware replacement workflow
+        serving_source: Booted into clone environment, serving disk to target
+        cloning_target: Booted into clone environment, receiving disk from source
         retired: Removed from inventory
     """
 
@@ -39,19 +41,23 @@ class NodeStateMachine:
         "reprovision",
         "deprovisioning",
         "migrating",
+        "serving_source",
+        "cloning_target",
         "retired",
     ]
 
     TRANSITIONS: ClassVar[dict[str, list[str]]] = {
-        "discovered": ["pending"],
+        "discovered": ["pending", "cloning_target"],
         "pending": ["installing"],
         "installing": ["installed", "install_failed"],
         "install_failed": ["pending"],
         "installed": ["active", "reprovision", "retired"],
-        "active": ["reprovision", "deprovisioning", "migrating"],
+        "active": ["reprovision", "deprovisioning", "migrating", "serving_source", "cloning_target"],
         "reprovision": ["pending"],
         "deprovisioning": ["retired"],
         "migrating": ["active"],
+        "serving_source": ["active"],
+        "cloning_target": ["installed"],
         "retired": [],
     }
 
