@@ -50,6 +50,7 @@ async def create_group(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new device group."""
+    # Check for duplicate name
     existing = await db.execute(
         select(DeviceGroup).where(DeviceGroup.name == group_data.name)
     )
@@ -59,9 +60,30 @@ async def create_group(
             detail=f"Group '{group_data.name}' already exists",
         )
 
+    # Validate parent if provided
+    parent = None
+    if group_data.parent_id:
+        result = await db.execute(
+            select(DeviceGroup).where(DeviceGroup.id == group_data.parent_id)
+        )
+        parent = result.scalar_one_or_none()
+        if not parent:
+            raise HTTPException(status_code=404, detail="Parent group not found")
+
+    # Compute path and depth
+    if parent:
+        path = f"{parent.path}/{group_data.name}"
+        depth = parent.depth + 1
+    else:
+        path = f"/{group_data.name}"
+        depth = 0
+
     group = DeviceGroup(
         name=group_data.name,
         description=group_data.description,
+        parent_id=group_data.parent_id,
+        path=path,
+        depth=depth,
         default_workflow_id=group_data.default_workflow_id,
         auto_provision=group_data.auto_provision,
     )

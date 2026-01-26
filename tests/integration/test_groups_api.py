@@ -130,3 +130,58 @@ class TestGroupNodes:
         )
         assert response.status_code == 200
         assert response.json()["data"]["group_id"] == group_id
+
+
+class TestGroupHierarchy:
+    """Test device group hierarchy operations."""
+
+    def test_create_group_with_parent(self, client: TestClient):
+        """Create child group with parent."""
+        # Create parent
+        parent_resp = client.post("/api/v1/groups", json={"name": "servers"})
+        parent_id = parent_resp.json()["data"]["id"]
+
+        # Create child
+        response = client.post(
+            "/api/v1/groups",
+            json={"name": "webservers", "parent_id": parent_id},
+        )
+        assert response.status_code == 201
+        data = response.json()["data"]
+        assert data["parent_id"] == parent_id
+        assert data["path"] == "/servers/webservers"
+        assert data["depth"] == 1
+
+    def test_create_root_group_has_correct_path(self, client: TestClient):
+        """Root group has path /{name} and depth 0."""
+        response = client.post("/api/v1/groups", json={"name": "servers"})
+        data = response.json()["data"]
+        assert data["parent_id"] is None
+        assert data["path"] == "/servers"
+        assert data["depth"] == 0
+
+    def test_create_group_invalid_parent_fails(self, client: TestClient):
+        """Creating group with non-existent parent fails."""
+        response = client.post(
+            "/api/v1/groups",
+            json={"name": "webservers", "parent_id": "nonexistent-uuid"},
+        )
+        assert response.status_code == 404
+        assert "Parent group not found" in response.json()["detail"]
+
+    def test_create_nested_hierarchy(self, client: TestClient):
+        """Create deeply nested hierarchy."""
+        # Level 0
+        r1 = client.post("/api/v1/groups", json={"name": "servers"})
+        id1 = r1.json()["data"]["id"]
+
+        # Level 1
+        r2 = client.post("/api/v1/groups", json={"name": "web", "parent_id": id1})
+        id2 = r2.json()["data"]["id"]
+
+        # Level 2
+        r3 = client.post("/api/v1/groups", json={"name": "prod", "parent_id": id2})
+        data = r3.json()["data"]
+
+        assert data["path"] == "/servers/web/prod"
+        assert data["depth"] == 2
