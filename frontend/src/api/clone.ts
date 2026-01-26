@@ -63,4 +63,46 @@ export const cloneApi = {
   async failed(sessionId: string, error: string): Promise<ApiResponse<{ status: string }>> {
     return apiClient.post<ApiResponse<{ status: string }>>(`/clone-sessions/${sessionId}/failed?error=${encodeURIComponent(error)}`, {})
   },
+
+  // Resize plan endpoints
+  async analyze(sessionId: string): Promise<ApiResponse<CloneAnalysisResponse>> {
+    return apiClient.post<ApiResponse<CloneAnalysisResponse>>(`/clone-sessions/${sessionId}/analyze`, {})
+  },
+
+  async getResizePlan(sessionId: string): Promise<ApiResponse<ResizePlan | null>> {
+    return apiClient.get<ApiResponse<ResizePlan | null>>(`/clone-sessions/${sessionId}/plan`)
+  },
+
+  async updateResizePlan(sessionId: string, plan: ResizePlan): Promise<ApiResponse<ResizePlan>> {
+    return apiClient.put<ApiResponse<ResizePlan>>(`/clone-sessions/${sessionId}/plan`, plan)
+  },
+}
+
+// ============== Resize Plan Types ==============
+
+export interface PartitionPlanItem {
+  partition: number
+  current_size_bytes: number
+  new_size_bytes: number
+  filesystem: string | null
+  action: 'keep' | 'shrink' | 'grow' | 'delete'
+  min_size_bytes: number | null
+  can_resize: boolean
+}
+
+export interface ResizePlan {
+  source_disk_bytes: number
+  target_disk_bytes: number
+  resize_mode: 'none' | 'shrink_source' | 'grow_target'
+  partitions: PartitionPlanItem[]
+  feasible: boolean
+  error_message: string | null
+}
+
+export interface CloneAnalysisResponse {
+  source_disk: Record<string, unknown> | null
+  target_disk: Record<string, unknown> | null
+  size_difference_bytes: number
+  resize_needed: boolean
+  suggested_plan: ResizePlan | null
 }

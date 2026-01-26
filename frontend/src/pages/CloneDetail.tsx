@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -12,6 +13,12 @@ import {
   ArrowRight,
   Activity,
   Network,
+  Upload,
+  Download,
+  Database,
+  CloudUpload,
+  CloudDownload,
+  Package,
 } from 'lucide-react'
 import {
   Button,
@@ -23,8 +30,15 @@ import {
   Progress,
 } from '@/components/ui'
 import { useCloneSession, useDeleteCloneSession, useCloneUpdates } from '@/hooks'
-import { CLONE_STATUS_COLORS, CLONE_STATUS_LABELS, type CloneStatus } from '@/types/clone'
+import {
+  CLONE_STATUS_COLORS,
+  CLONE_STATUS_LABELS,
+  type CloneStatus,
+  type StagingStatus,
+} from '@/types/clone'
 import { cn } from '@/lib/utils'
+import { cloneApi, type ResizePlan } from '@/api/clone'
+import { ResizePlanEditor } from '@/components/clone'
 
 /**
  * Format bytes to human-readable string
@@ -108,13 +122,286 @@ function getStatusIcon(status: CloneStatus) {
   }
 }
 
+/**
+ * Staged mode progress phases configuration
+ */
+const STAGING_PHASES: {
+  status: StagingStatus
+  label: string
+  icon: React.ElementType
+  color: string
+  bgColor: string
+}[] = [
+  {
+    status: 'pending',
+    label: 'Pending',
+    icon: Clock,
+    color: 'text-gray-500',
+    bgColor: 'bg-gray-100',
+  },
+  {
+    status: 'provisioned',
+    label: 'Storage Ready',
+    icon: Database,
+    color: 'text-blue-500',
+    bgColor: 'bg-blue-100',
+  },
+  {
+    status: 'uploading',
+    label: 'Uploading',
+    icon: CloudUpload,
+    color: 'text-yellow-500',
+    bgColor: 'bg-yellow-100',
+  },
+  {
+    status: 'ready',
+    label: 'Ready',
+    icon: Package,
+    color: 'text-green-500',
+    bgColor: 'bg-green-100',
+  },
+  {
+    status: 'downloading',
+    label: 'Downloading',
+    icon: CloudDownload,
+    color: 'text-purple-500',
+    bgColor: 'bg-purple-100',
+  },
+  {
+    status: 'cleanup',
+    label: 'Cleanup',
+    icon: Loader2,
+    color: 'text-gray-500',
+    bgColor: 'bg-gray-100',
+  },
+  {
+    status: 'deleted',
+    label: 'Deleted',
+    icon: CheckCircle,
+    color: 'text-gray-400',
+    bgColor: 'bg-gray-50',
+  },
+]
+
+/**
+ * Get the phase index for a staging status
+ */
+function getStagingPhaseIndex(status: StagingStatus | null): number {
+  if (!status) return -1
+  return STAGING_PHASES.findIndex((p) => p.status === status)
+}
+
+interface StagedProgressDisplayProps {
+  stagingStatus: StagingStatus | null
+  stagingBackendName: string | null
+  stagingPath: string | null
+}
+
+/**
+ * Display staged mode progress with distinct phases
+ */
+function StagedProgressDisplay({
+  stagingStatus,
+  stagingBackendName,
+  stagingPath,
+}: StagedProgressDisplayProps) {
+  const currentPhaseIndex = getStagingPhaseIndex(stagingStatus)
+
+  // Main phases for display (exclude cleanup and deleted for cleaner UI)
+  const mainPhases = STAGING_PHASES.slice(0, 5)
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Database className="h-5 w-5" />
+          Staged Mode Progress
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Phase progress indicator */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            {mainPhases.map((phase, index) => {
+              const isActive = index === currentPhaseIndex
+              const isCompleted = index < currentPhaseIndex
+              const Icon = phase.icon
+
+              return (
+                <div
+                  key={phase.status}
+                  className="flex flex-col items-center gap-1 flex-1"
+                >
+                  <div
+                    className={cn(
+                      'flex items-center justify-center w-10 h-10 rounded-full border-2 transition-all',
+                      isActive && `${phase.bgColor} ${phase.color} border-current`,
+                      isCompleted && 'bg-green-100 text-green-600 border-green-500',
+                      !isActive && !isCompleted && 'bg-gray-50 text-gray-400 border-gray-200'
+                    )}
+                  >
+                    {isCompleted ? (
+                      <CheckCircle className="h-5 w-5" />
+                    ) : isActive && phase.status === 'uploading' ? (
+                      <Icon className="h-5 w-5 animate-pulse" />
+                    ) : isActive && phase.status === 'downloading' ? (
+                      <Icon className="h-5 w-5 animate-pulse" />
+                    ) : (
+                      <Icon className="h-5 w-5" />
+                    )}
+                  </div>
+                  <span
+                    className={cn(
+                      'text-xs font-medium text-center',
+                      isActive && phase.color,
+                      isCompleted && 'text-green-600',
+                      !isActive && !isCompleted && 'text-gray-400'
+                    )}
+                  >
+                    {phase.label}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Progress line */}
+          <div className="relative h-1 bg-gray-200 rounded-full mx-5">
+            <div
+              className="absolute inset-y-0 left-0 bg-green-500 rounded-full transition-all duration-500"
+              style={{
+                width: `${Math.max(0, Math.min(100, (currentPhaseIndex / (mainPhases.length - 1)) * 100))}%`,
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Storage backend info */}
+        <div className="grid grid-cols-2 gap-4 text-sm pt-2 border-t">
+          <div>
+            <div className="text-muted-foreground">Storage Backend</div>
+            <div className="font-medium">{stagingBackendName || 'Not configured'}</div>
+          </div>
+          {stagingPath && (
+            <div>
+              <div className="text-muted-foreground">Storage Path</div>
+              <code className="text-xs break-all">{stagingPath}</code>
+            </div>
+          )}
+        </div>
+
+        {/* Current phase status */}
+        {stagingStatus && (
+          <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
+            {stagingStatus === 'uploading' && (
+              <>
+                <Upload className="h-4 w-4 text-yellow-500 animate-bounce" />
+                <span className="text-sm">
+                  Uploading disk image to storage backend...
+                </span>
+              </>
+            )}
+            {stagingStatus === 'ready' && (
+              <>
+                <Package className="h-4 w-4 text-green-500" />
+                <span className="text-sm">
+                  Disk image ready for target node download
+                </span>
+              </>
+            )}
+            {stagingStatus === 'downloading' && (
+              <>
+                <Download className="h-4 w-4 text-purple-500 animate-bounce" />
+                <span className="text-sm">
+                  Target node downloading disk image...
+                </span>
+              </>
+            )}
+            {stagingStatus === 'pending' && (
+              <>
+                <Clock className="h-4 w-4 text-gray-500" />
+                <span className="text-sm">
+                  Waiting for source node to begin upload
+                </span>
+              </>
+            )}
+            {stagingStatus === 'provisioned' && (
+              <>
+                <Database className="h-4 w-4 text-blue-500" />
+                <span className="text-sm">
+                  Storage provisioned, ready for upload
+                </span>
+              </>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 export function CloneDetail() {
   const { id } = useParams<{ id: string }>()
-  const { data: response, isLoading, error } = useCloneSession(id ?? '')
+  const { data: response, isLoading, error, refetch } = useCloneSession(id ?? '')
   const deleteSession = useDeleteCloneSession()
 
   // Enable real-time updates
   const { isConnected } = useCloneUpdates()
+
+  // Resize plan state
+  const [resizePlan, setResizePlan] = useState<ResizePlan | null>(null)
+  const [isLoadingPlan, setIsLoadingPlan] = useState(false)
+  const [isSavingPlan, setIsSavingPlan] = useState(false)
+  const [planError, setPlanError] = useState<string | null>(null)
+
+  // Fetch resize plan when session has resize mode != none
+  useEffect(() => {
+    async function fetchResizePlan() {
+      if (!id || !response?.data) return
+      if (response.data.resize_mode === 'none') return
+
+      setIsLoadingPlan(true)
+      setPlanError(null)
+
+      try {
+        const planResponse = await cloneApi.getResizePlan(id)
+        if (planResponse.data) {
+          setResizePlan(planResponse.data)
+        } else {
+          // Try to analyze and get a suggested plan
+          const analysisResponse = await cloneApi.analyze(id)
+          if (analysisResponse.data?.suggested_plan) {
+            setResizePlan(analysisResponse.data.suggested_plan)
+          }
+        }
+      } catch (err) {
+        setPlanError(err instanceof Error ? err.message : 'Failed to load resize plan')
+      } finally {
+        setIsLoadingPlan(false)
+      }
+    }
+
+    fetchResizePlan()
+  }, [id, response?.data?.resize_mode])
+
+  const handleSaveResizePlan = async (updatedPlan: ResizePlan) => {
+    if (!id) return
+
+    setIsSavingPlan(true)
+    setPlanError(null)
+
+    try {
+      const savedPlan = await cloneApi.updateResizePlan(id, updatedPlan)
+      if (savedPlan.data) {
+        setResizePlan(savedPlan.data)
+      }
+      refetch()
+    } catch (err) {
+      setPlanError(err instanceof Error ? err.message : 'Failed to save resize plan')
+    } finally {
+      setIsSavingPlan(false)
+    }
+  }
 
   const handleCancel = () => {
     if (!id) return
@@ -251,6 +538,46 @@ export function CloneDetail() {
                 </div>
               </CardContent>
             </Card>
+          )}
+
+          {/* Staged Mode Progress - Show for staged mode clones */}
+          {session.clone_mode === 'staged' && (
+            <StagedProgressDisplay
+              stagingStatus={session.staging_status}
+              stagingBackendName={session.staging_backend_name}
+              stagingPath={session.staging_path}
+            />
+          )}
+
+          {/* Resize Plan Editor - Show when resize mode is not none */}
+          {session.resize_mode !== 'none' && (
+            <div className="space-y-2">
+              {isLoadingPlan ? (
+                <Card>
+                  <CardContent className="py-8">
+                    <div className="flex items-center justify-center gap-2 text-muted-foreground">
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                      Loading resize plan...
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : resizePlan ? (
+                <ResizePlanEditor
+                  plan={resizePlan}
+                  onSave={handleSaveResizePlan}
+                  isLoading={isSavingPlan}
+                />
+              ) : planError ? (
+                <Card className="border-destructive">
+                  <CardContent className="py-6">
+                    <div className="flex items-center gap-2 text-destructive">
+                      <AlertCircle className="h-5 w-5" />
+                      {planError}
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : null}
+            </div>
           )}
 
           {/* Error Message */}
