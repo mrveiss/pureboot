@@ -3,7 +3,17 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from src.db.models import Base, Node, DeviceGroup, NodeTag, Template, TemplateVersion, Workflow, WorkflowStep
+from src.db.models import (
+    Base,
+    Node,
+    DeviceGroup,
+    NodeTag,
+    Template,
+    TemplateVersion,
+    Workflow,
+    WorkflowStep,
+    WorkflowExecution,
+)
 
 
 @pytest.fixture
@@ -545,3 +555,125 @@ class TestWorkflowStep:
         session.flush()
 
         assert step.next_state == "active"
+
+
+class TestWorkflowExecution:
+    """Test WorkflowExecution model."""
+
+    def test_execution_creation(self, session):
+        """WorkflowExecution can be created."""
+        node = Node(mac_address="aa:bb:cc:dd:ee:ff")
+        workflow = Workflow(name="test-workflow", os_family="linux")
+        session.add_all([node, workflow])
+        session.flush()
+
+        execution = WorkflowExecution(
+            node_id=node.id,
+            workflow_id=workflow.id,
+        )
+        session.add(execution)
+        session.flush()
+
+        assert execution.id is not None
+        assert execution.status == "pending"
+        assert execution.started_at is None
+
+    def test_execution_status_transitions(self, session):
+        """WorkflowExecution status can be updated."""
+        from datetime import datetime
+
+        node = Node(mac_address="aa:bb:cc:dd:ee:ff")
+        workflow = Workflow(name="test-workflow", os_family="linux")
+        session.add_all([node, workflow])
+        session.flush()
+
+        execution = WorkflowExecution(node_id=node.id, workflow_id=workflow.id)
+        session.add(execution)
+        session.flush()
+
+        execution.status = "running"
+        execution.started_at = datetime.utcnow()
+        session.flush()
+
+        assert execution.status == "running"
+        assert execution.started_at is not None
+
+    def test_execution_with_current_step(self, session):
+        """WorkflowExecution can track current step."""
+        node = Node(mac_address="aa:bb:cc:dd:ee:ff")
+        workflow = Workflow(name="test-workflow", os_family="linux")
+        session.add_all([node, workflow])
+        session.flush()
+
+        step = WorkflowStep(
+            workflow_id=workflow.id,
+            sequence=1,
+            name="Boot",
+            type="boot",
+        )
+        session.add(step)
+        session.flush()
+
+        execution = WorkflowExecution(
+            node_id=node.id,
+            workflow_id=workflow.id,
+            current_step_id=step.id,
+        )
+        session.add(execution)
+        session.flush()
+
+        assert execution.current_step_id == step.id
+        assert execution.current_step.name == "Boot"
+
+    def test_execution_relationships(self, session):
+        """WorkflowExecution has correct relationships."""
+        node = Node(mac_address="aa:bb:cc:dd:ee:ff")
+        workflow = Workflow(name="test-workflow", os_family="linux")
+        session.add_all([node, workflow])
+        session.flush()
+
+        execution = WorkflowExecution(node_id=node.id, workflow_id=workflow.id)
+        session.add(execution)
+        session.flush()
+
+        assert execution.node.mac_address == "aa:bb:cc:dd:ee:ff"
+        assert execution.workflow.name == "test-workflow"
+
+    def test_execution_error_tracking(self, session):
+        """WorkflowExecution can track errors."""
+        from datetime import datetime
+
+        node = Node(mac_address="aa:bb:cc:dd:ee:ff")
+        workflow = Workflow(name="test-workflow", os_family="linux")
+        session.add_all([node, workflow])
+        session.flush()
+
+        execution = WorkflowExecution(node_id=node.id, workflow_id=workflow.id)
+        session.add(execution)
+        session.flush()
+
+        execution.status = "failed"
+        execution.error_message = "Installation timeout exceeded"
+        execution.completed_at = datetime.utcnow()
+        session.flush()
+
+        assert execution.status == "failed"
+        assert execution.error_message == "Installation timeout exceeded"
+        assert execution.completed_at is not None
+
+    def test_execution_cascade_delete_on_node(self, session):
+        """WorkflowExecution is deleted when node is deleted."""
+        node = Node(mac_address="aa:bb:cc:dd:ee:ff")
+        workflow = Workflow(name="test-workflow", os_family="linux")
+        session.add_all([node, workflow])
+        session.flush()
+
+        execution = WorkflowExecution(node_id=node.id, workflow_id=workflow.id)
+        session.add(execution)
+        session.flush()
+
+        execution_id = execution.id
+        session.delete(node)
+        session.flush()
+
+        assert session.get(WorkflowExecution, execution_id) is None

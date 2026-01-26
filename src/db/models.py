@@ -524,6 +524,87 @@ class WorkflowStep(Base):
     )
 
 
+class WorkflowExecution(Base):
+    """Execution instance of a workflow on a specific node."""
+
+    __tablename__ = "workflow_executions"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    workflow_id: Mapped[str] = mapped_column(
+        ForeignKey("workflows.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    current_step_id: Mapped[str | None] = mapped_column(
+        ForeignKey("workflow_steps.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Status: pending, running, completed, failed, cancelled
+    status: Mapped[str] = mapped_column(
+        String(50), default="pending", nullable=False, index=True
+    )
+
+    # Timing
+    started_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    # Error tracking
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    # Relationships
+    node: Mapped["Node"] = relationship()
+    workflow: Mapped["Workflow"] = relationship()
+    current_step: Mapped["WorkflowStep | None"] = relationship()
+    step_results: Mapped[list["WorkflowStepResult"]] = relationship(
+        back_populates="execution", cascade="all, delete-orphan"
+    )
+
+
+class WorkflowStepResult(Base):
+    """Result of executing a workflow step."""
+
+    __tablename__ = "workflow_step_results"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    execution_id: Mapped[str] = mapped_column(
+        ForeignKey("workflow_executions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    step_id: Mapped[str] = mapped_column(
+        ForeignKey("workflow_steps.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    # Status: pending, running, completed, failed, skipped
+    status: Mapped[str] = mapped_column(
+        String(50), default="pending", nullable=False, index=True
+    )
+
+    # Timing
+    started_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    # Result tracking
+    output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retry_count: Mapped[int] = mapped_column(default=0)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    # Relationships
+    execution: Mapped["WorkflowExecution"] = relationship(back_populates="step_results")
+    step: Mapped["WorkflowStep"] = relationship()
+
+
 class Approval(Base):
     """Approval request for four-eye principle operations."""
 
