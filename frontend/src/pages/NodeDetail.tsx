@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Server, Clock, Cpu, Network, Tag, Workflow, X, Play, RotateCcw } from 'lucide-react'
+import { ArrowLeft, Server, Clock, Cpu, Network, Tag, Workflow, X, Play, RotateCcw, HardDrive } from 'lucide-react'
 import {
   Button,
   Card,
@@ -385,6 +385,29 @@ export function NodeDetail() {
                     </Button>
                   </div>
                 )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Disk Management - available when node is in deploy environment */}
+          {(node.state === 'pending' || node.state === 'installing') && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <HardDrive className="h-5 w-5" />
+                  Disk Management
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Manage disk partitions while the node is booted into the deploy environment.
+                </p>
+                <Button variant="outline" className="w-full" asChild>
+                  <Link to={`/nodes/${node.id}/partitions`}>
+                    <HardDrive className="mr-2 h-4 w-4" />
+                    Open Partition Manager
+                  </Link>
+                </Button>
               </CardContent>
             </Card>
           )}
