@@ -503,6 +503,231 @@ EOF
 }
 
 # =============================================================================
+# NFS Mount Functions
+# =============================================================================
+
+# Mount NFS share
+# Usage: mount_nfs "server" "export" "mountpoint" ["options"]
+# Returns: 0 on success, 1 on failure
+mount_nfs() {
+    local server="$1"
+    local export_path="$2"
+    local mountpoint="$3"
+    local options="${4:-rw,sync,noatime}"
+
+    log "Mounting NFS share ${server}:${export_path} at ${mountpoint}"
+
+    # Create mountpoint if needed
+    mkdir -p "${mountpoint}"
+
+    # Mount NFS
+    if ! mount -t nfs -o "${options}" "${server}:${export_path}" "${mountpoint}"; then
+        log_error "Failed to mount NFS share"
+        return 1
+    fi
+
+    log "NFS share mounted successfully"
+    return 0
+}
+
+# Unmount NFS share
+# Usage: unmount_nfs "mountpoint"
+# Returns: 0 on success
+unmount_nfs() {
+    local mountpoint="$1"
+
+    log "Unmounting NFS share at ${mountpoint}"
+
+    # Sync before unmount
+    sync
+
+    if mountpoint -q "${mountpoint}"; then
+        if ! umount "${mountpoint}"; then
+            log_error "Failed to unmount NFS share, trying lazy unmount"
+            umount -l "${mountpoint}" || true
+        fi
+    fi
+
+    log "NFS share unmounted"
+    return 0
+}
+
+# =============================================================================
+# iSCSI Functions
+# =============================================================================
+
+# Login to iSCSI target
+# Usage: iscsi_login "target" "portal" ["username" "password"]
+# Returns: 0 on success, 1 on failure
+iscsi_login() {
+    local target="$1"
+    local portal="$2"
+    local username="${3:-}"
+    local password="${4:-}"
+
+    log "Connecting to iSCSI target ${target} at ${portal}"
+
+    # Set up authentication if provided
+    if [[ -n "${username}" ]] && [[ -n "${password}" ]]; then
+        iscsiadm -m node -T "${target}" -p "${portal}" \
+            --op update -n node.session.auth.authmethod -v CHAP
+        iscsiadm -m node -T "${target}" -p "${portal}" \
+            --op update -n node.session.auth.username -v "${username}"
+        iscsiadm -m node -T "${target}" -p "${portal}" \
+            --op update -n node.session.auth.password -v "${password}"
+    fi
+
+    # Discover and login
+    iscsiadm -m discovery -t sendtargets -p "${portal}" 2>/dev/null || true
+
+    if ! iscsiadm -m node -T "${target}" -p "${portal}" --login; then
+        log_error "Failed to login to iSCSI target"
+        return 1
+    fi
+
+    # Wait for device to appear
+    local retries=10
+    while [[ ${retries} -gt 0 ]]; do
+        if get_iscsi_device "${target}" >/dev/null 2>&1; then
+            log "iSCSI target connected successfully"
+            return 0
+        fi
+        sleep 1
+        ((retries--))
+    done
+
+    log_error "iSCSI device did not appear"
+    return 1
+}
+
+# Logout from iSCSI target
+# Usage: iscsi_logout "target" ["portal"]
+# Returns: 0 on success
+iscsi_logout() {
+    local target="$1"
+    local portal="${2:-}"
+
+    log "Disconnecting from iSCSI target ${target}"
+
+    # Sync before logout
+    sync
+
+    if [[ -n "${portal}" ]]; then
+        iscsiadm -m node -T "${target}" -p "${portal}" --logout 2>/dev/null || true
+    else
+        iscsiadm -m node -T "${target}" --logout 2>/dev/null || true
+    fi
+
+    log "iSCSI target disconnected"
+    return 0
+}
+
+# Get device path for iSCSI target
+# Usage: get_iscsi_device "target"
+# Returns: device path on stdout, 0 on success, 1 on failure
+get_iscsi_device() {
+    local target="$1"
+    local device
+
+    # Find the device by target name
+    device=$(lsblk -n -o NAME,TRAN | grep iscsi | head -1 | awk '{print "/dev/"$1}')
+
+    if [[ -z "${device}" ]] || [[ ! -b "${device}" ]]; then
+        # Alternative: find by session
+        local session
+        session=$(iscsiadm -m session 2>/dev/null | grep "${target}" | awk '{print $2}' | tr -d '[]')
+        if [[ -n "${session}" ]]; then
+            device=$(ls /sys/class/iscsi_session/session${session}/device/target*/*/block/ 2>/dev/null | head -1)
+            if [[ -n "${device}" ]]; then
+                device="/dev/${device}"
+            fi
+        fi
+    fi
+
+    if [[ -z "${device}" ]] || [[ ! -b "${device}" ]]; then
+        log_error "Could not find iSCSI device for target ${target}"
+        return 1
+    fi
+
+    echo "${device}"
+    return 0
+}
+
+# =============================================================================
+# Staging Mount Functions
+# =============================================================================
+
+# Mount staging storage based on type
+# Usage: mount_staging "staging_info_json" "mountpoint"
+# Returns: device path for iSCSI, or confirms NFS mount. 0 on success, 1 on failure
+mount_staging() {
+    local staging_json="$1"
+    local mountpoint="$2"
+    local staging_type
+
+    staging_type=$(echo "${staging_json}" | jq -r '.type')
+
+    case "${staging_type}" in
+        nfs)
+            local server export_path options path
+            server=$(echo "${staging_json}" | jq -r '.server')
+            export_path=$(echo "${staging_json}" | jq -r '.export')
+            path=$(echo "${staging_json}" | jq -r '.path // empty')
+            options=$(echo "${staging_json}" | jq -r '.options // "rw,sync,noatime"')
+
+            # Full path includes subdirectory
+            local full_export="${export_path}"
+            if [[ -n "${path}" ]]; then
+                full_export="${export_path}/${path}"
+            fi
+
+            mount_nfs "${server}" "${full_export}" "${mountpoint}" "${options}"
+            ;;
+        iscsi)
+            local target portal username password
+            target=$(echo "${staging_json}" | jq -r '.target')
+            portal=$(echo "${staging_json}" | jq -r '.portal')
+            username=$(echo "${staging_json}" | jq -r '.username // empty')
+            password=$(echo "${staging_json}" | jq -r '.password // empty')
+
+            iscsi_login "${target}" "${portal}" "${username}" "${password}"
+            get_iscsi_device "${target}"
+            ;;
+        *)
+            log_error "Unknown staging type: ${staging_type}"
+            return 1
+            ;;
+    esac
+}
+
+# Unmount staging storage based on type
+# Usage: unmount_staging "staging_info_json" "mountpoint"
+# Returns: 0 on success, 1 on failure
+unmount_staging() {
+    local staging_json="$1"
+    local mountpoint="$2"
+    local staging_type
+
+    staging_type=$(echo "${staging_json}" | jq -r '.type')
+
+    case "${staging_type}" in
+        nfs)
+            unmount_nfs "${mountpoint}"
+            ;;
+        iscsi)
+            local target portal
+            target=$(echo "${staging_json}" | jq -r '.target')
+            portal=$(echo "${staging_json}" | jq -r '.portal // empty')
+            iscsi_logout "${target}" "${portal}"
+            ;;
+        *)
+            log_error "Unknown staging type: ${staging_type}"
+            return 1
+            ;;
+    esac
+}
+
+# =============================================================================
 # Initialization
 # =============================================================================
 
