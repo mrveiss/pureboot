@@ -3,7 +3,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from src.db.models import Base, Node, DeviceGroup, NodeTag, Template, TemplateVersion
+from src.db.models import Base, Node, DeviceGroup, NodeTag, Template, TemplateVersion, Workflow
 
 
 @pytest.fixture
@@ -333,3 +333,66 @@ class TestTemplateVersion:
         session.flush()
 
         assert template.current_version_id == version.id
+
+
+class TestWorkflow:
+    """Test Workflow model."""
+
+    def test_workflow_creation(self, session):
+        """Workflow can be created with required fields."""
+        workflow = Workflow(
+            name="ubuntu-2404",
+            description="Ubuntu 24.04 Server",
+            os_family="linux",
+        )
+        session.add(workflow)
+        session.flush()
+
+        assert workflow.id is not None
+        assert workflow.name == "ubuntu-2404"
+        assert workflow.os_family == "linux"
+        assert workflow.architecture == "x86_64"
+        assert workflow.boot_mode == "bios"
+        assert workflow.is_active is True
+
+    def test_workflow_unique_name(self, session):
+        """Workflow name must be unique."""
+        w1 = Workflow(name="ubuntu", os_family="linux")
+        session.add(w1)
+        session.flush()
+
+        w2 = Workflow(name="ubuntu", os_family="linux")
+        session.add(w2)
+
+        with pytest.raises(Exception):
+            session.flush()
+
+    def test_workflow_default_description(self, session):
+        """Workflow description defaults to empty string."""
+        workflow = Workflow(name="rhel-9", os_family="linux")
+        session.add(workflow)
+        session.flush()
+
+        assert workflow.description == ""
+
+    def test_workflow_custom_architecture_and_boot_mode(self, session):
+        """Workflow can have custom architecture and boot_mode."""
+        workflow = Workflow(
+            name="ubuntu-arm",
+            os_family="linux",
+            architecture="aarch64",
+            boot_mode="uefi",
+        )
+        session.add(workflow)
+        session.flush()
+
+        assert workflow.architecture == "aarch64"
+        assert workflow.boot_mode == "uefi"
+
+    def test_workflow_is_active_flag(self, session):
+        """Workflow is_active can be set to False for soft delete."""
+        workflow = Workflow(name="deprecated", os_family="windows", is_active=False)
+        session.add(workflow)
+        session.flush()
+
+        assert workflow.is_active is False

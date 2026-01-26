@@ -451,6 +451,37 @@ class TemplateVersion(Base):
     )
 
 
+class Workflow(Base):
+    """Workflow definition for provisioning orchestration."""
+
+    __tablename__ = "workflows"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="")
+    os_family: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True
+    )  # linux, windows, bsd
+    architecture: Mapped[str] = mapped_column(String(50), default="x86_64")
+    boot_mode: Mapped[str] = mapped_column(String(50), default="bios")
+    is_active: Mapped[bool] = mapped_column(default=True, index=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        default=func.now(), onupdate=func.now()
+    )
+
+    # Relationships
+    steps: Mapped[list["WorkflowStep"]] = relationship(
+        back_populates="workflow",
+        cascade="all, delete-orphan",
+        order_by="WorkflowStep.sequence",
+    )
+
+
 class Approval(Base):
     """Approval request for four-eye principle operations."""
 
