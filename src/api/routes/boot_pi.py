@@ -12,10 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.api.schemas import (
+    MAC_PATTERN,
     ApiResponse,
     NodeResponse,
     PiBootResponse,
     PiRegisterRequest,
+    normalize_mac,
 )
 from src.config import settings
 from src.core.workflow_service import Workflow, WorkflowNotFoundError, WorkflowService
@@ -57,7 +59,7 @@ async def get_pi_boot_instructions(
         None,
         description="MAC address for auto-registration",
     ),
-    request: Request = None,
+    request: Request | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> PiBootResponse:
     """Get boot instructions for a Raspberry Pi.
@@ -87,14 +89,12 @@ async def get_pi_boot_instructions(
 
     # Validate MAC if provided
     if mac:
-        import re
-        mac_pattern = re.compile(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$")
-        if not mac_pattern.match(mac):
+        if not MAC_PATTERN.match(mac):
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid MAC address format: {mac}",
             )
-        mac = mac.replace("-", ":").lower()
+        mac = normalize_mac(mac)
 
     # Get client IP
     client_ip = request.client.host if request and request.client else None
