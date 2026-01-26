@@ -3,7 +3,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from src.db.models import Base, Node, DeviceGroup, NodeTag
+from src.db.models import Base, Node, DeviceGroup, NodeTag, Template, TemplateVersion
 
 
 @pytest.fixture
@@ -205,3 +205,131 @@ class TestDeviceGroupHierarchy:
         session.commit()
 
         assert group.auto_provision is None
+
+
+class TestTemplateVersion:
+    """Test TemplateVersion model."""
+
+    def test_template_version_creation(self, session):
+        """TemplateVersion can be created with required fields."""
+        template = Template(name="test-template", type="kickstart")
+        session.add(template)
+        session.flush()
+
+        version = TemplateVersion(
+            template_id=template.id,
+            major=1,
+            minor=0,
+            content="# kickstart content",
+            content_hash="abc123",
+        )
+        session.add(version)
+        session.flush()
+
+        assert version.id is not None
+        assert version.major == 1
+        assert version.minor == 0
+        assert version.version_string == "v1.0"
+
+    def test_template_version_unique_constraint(self, session):
+        """TemplateVersion enforces unique major.minor per template."""
+        template = Template(name="test-template", type="kickstart")
+        session.add(template)
+        session.flush()
+
+        v1 = TemplateVersion(
+            template_id=template.id, major=1, minor=0,
+            content="v1", content_hash="hash1"
+        )
+        session.add(v1)
+        session.flush()
+
+        v1_dup = TemplateVersion(
+            template_id=template.id, major=1, minor=0,
+            content="v1 dup", content_hash="hash2"
+        )
+        session.add(v1_dup)
+
+        with pytest.raises(Exception):  # IntegrityError
+            session.flush()
+
+    def test_template_version_relationship(self, session):
+        """Template has versions relationship."""
+        template = Template(name="test-template", type="kickstart")
+        session.add(template)
+        session.flush()
+
+        v1 = TemplateVersion(
+            template_id=template.id, major=1, minor=0,
+            content="v1.0 content", content_hash="hash1"
+        )
+        v2 = TemplateVersion(
+            template_id=template.id, major=1, minor=1,
+            content="v1.1 content", content_hash="hash2"
+        )
+        session.add_all([v1, v2])
+        session.flush()
+
+        assert len(template.versions) == 2
+        assert v1 in template.versions
+        assert v2 in template.versions
+
+    def test_template_version_cascade_delete(self, session):
+        """Versions are deleted when template is deleted."""
+        template = Template(name="test-template", type="kickstart")
+        session.add(template)
+        session.flush()
+
+        version = TemplateVersion(
+            template_id=template.id, major=1, minor=0,
+            content="content", content_hash="hash"
+        )
+        session.add(version)
+        session.flush()
+
+        version_id = version.id
+        session.delete(template)
+        session.flush()
+
+        assert session.get(TemplateVersion, version_id) is None
+
+    def test_template_version_optional_fields(self, session):
+        """TemplateVersion optional fields work correctly."""
+        template = Template(name="test-template", type="kickstart")
+        session.add(template)
+        session.flush()
+
+        version = TemplateVersion(
+            template_id=template.id,
+            major=1,
+            minor=0,
+            content="# kickstart content",
+            content_hash="abc123def456",
+            size_bytes=1024,
+            commit_message="Initial version",
+            file_path="/templates/kickstart/test.ks",
+        )
+        session.add(version)
+        session.flush()
+
+        assert version.size_bytes == 1024
+        assert version.commit_message == "Initial version"
+        assert version.file_path == "/templates/kickstart/test.ks"
+
+    def test_template_current_version_id(self, session):
+        """Template can track current version."""
+        template = Template(name="test-template", type="kickstart")
+        session.add(template)
+        session.flush()
+
+        version = TemplateVersion(
+            template_id=template.id, major=1, minor=0,
+            content="content", content_hash="hash"
+        )
+        session.add(version)
+        session.flush()
+
+        template.current_version_id = version.id
+        session.flush()
+
+        assert template.current_version_id == version.id

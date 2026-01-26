@@ -386,6 +386,9 @@ class Template(Base):
     size_bytes: Mapped[int | None] = mapped_column(nullable=True)
     checksum: Mapped[str | None] = mapped_column(String(64))  # SHA256
 
+    # Version tracking
+    current_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
     # Metadata
     description: Mapped[str | None] = mapped_column(Text)
 
@@ -393,6 +396,58 @@ class Template(Base):
     created_at: Mapped[datetime] = mapped_column(default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         default=func.now(), onupdate=func.now()
+    )
+
+    # Relationships
+    versions: Mapped[list["TemplateVersion"]] = relationship(
+        back_populates="template", cascade="all, delete-orphan"
+    )
+
+
+class TemplateVersion(Base):
+    """Version of a template with semantic major.minor versioning."""
+
+    __tablename__ = "template_versions"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    template_id: Mapped[str] = mapped_column(
+        ForeignKey("templates.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    major: Mapped[int] = mapped_column(nullable=False)
+    minor: Mapped[int] = mapped_column(nullable=False)
+
+    # Content
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    size_bytes: Mapped[int | None] = mapped_column(nullable=True)
+
+    # Metadata
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    created_by_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    commit_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # File storage (optional, for large templates stored externally)
+    file_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    storage_backend_id: Mapped[str | None] = mapped_column(
+        ForeignKey("storage_backends.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Relationships
+    template: Mapped["Template"] = relationship(back_populates="versions")
+    created_by: Mapped["User | None"] = relationship()
+    storage_backend: Mapped["StorageBackend | None"] = relationship()
+
+    @property
+    def version_string(self) -> str:
+        """Return semantic version string (e.g., 'v1.0')."""
+        return f"v{self.major}.{self.minor}"
+
+    __table_args__ = (
+        UniqueConstraint("template_id", "major", "minor", name="uq_template_version"),
     )
 
 
