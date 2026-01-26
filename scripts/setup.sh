@@ -204,6 +204,8 @@ create_directories() {
     mkdir -p "$INSTALL_DIR/tftp/grub"
     mkdir -p "$INSTALL_DIR/assets"
     mkdir -p "$INSTALL_DIR/data"
+    mkdir -p "$INSTALL_DIR/certs"
+    mkdir -p /var/lib/pureboot/workflows
 }
 
 install_bootloaders_from_repo() {
@@ -387,6 +389,13 @@ copy_application_files() {
     cp -r "$PROJECT_ROOT/docker" "$INSTALL_DIR/"
     cp "$PROJECT_ROOT/requirements.txt" "$INSTALL_DIR/"
     cp "$PROJECT_ROOT/pyproject.toml" "$INSTALL_DIR/" 2>/dev/null || true
+
+    # Copy workflow definitions
+    if [ -d "$PROJECT_ROOT/workflows" ]; then
+        log_info "Copying workflow definitions..."
+        cp -r "$PROJECT_ROOT/workflows/"* /var/lib/pureboot/workflows/ 2>/dev/null || true
+        chown -R "$SERVICE_USER:$SERVICE_GROUP" /var/lib/pureboot/workflows 2>/dev/null || true
+    fi
 }
 
 setup_venv() {
@@ -542,6 +551,11 @@ do_update() {
     check_ubuntu
     check_python_version
     check_node_version
+
+    # Ensure directories exist (may be new in updates)
+    mkdir -p "$INSTALL_DIR/certs"
+    mkdir -p /var/lib/pureboot/workflows
+
     copy_application_files
     install_python_deps
     build_frontend
