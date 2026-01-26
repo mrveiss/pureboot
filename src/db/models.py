@@ -482,6 +482,48 @@ class Workflow(Base):
     )
 
 
+class WorkflowStep(Base):
+    """Individual step within a workflow for provisioning orchestration."""
+
+    __tablename__ = "workflow_steps"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    workflow_id: Mapped[str] = mapped_column(
+        ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    sequence: Mapped[int] = mapped_column(nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # boot, script, reboot, wait, cloud_init
+
+    # Step configuration
+    config_json: Mapped[str] = mapped_column(Text, default="{}")
+    timeout_seconds: Mapped[int] = mapped_column(default=3600)
+
+    # Failure handling
+    on_failure: Mapped[str] = mapped_column(
+        String(50), default="fail"
+    )  # fail, retry, skip, rollback
+    max_retries: Mapped[int] = mapped_column(default=3)
+    retry_delay_seconds: Mapped[int] = mapped_column(default=30)
+
+    # State transition
+    next_state: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
+    )  # node state after step completes
+    rollback_step_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
+    # Relationships
+    workflow: Mapped["Workflow"] = relationship(back_populates="steps")
+
+    __table_args__ = (
+        UniqueConstraint("workflow_id", "sequence", name="uq_workflow_step_sequence"),
+    )
+
+
 class Approval(Base):
     """Approval request for four-eye principle operations."""
 

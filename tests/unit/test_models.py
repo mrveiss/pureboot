@@ -3,7 +3,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from src.db.models import Base, Node, DeviceGroup, NodeTag, Template, TemplateVersion, Workflow
+from src.db.models import Base, Node, DeviceGroup, NodeTag, Template, TemplateVersion, Workflow, WorkflowStep
 
 
 @pytest.fixture
@@ -396,3 +396,152 @@ class TestWorkflow:
         session.flush()
 
         assert workflow.is_active is False
+
+
+class TestWorkflowStep:
+    """Test WorkflowStep model."""
+
+    def test_workflow_step_creation(self, session):
+        """WorkflowStep can be created with required fields."""
+        workflow = Workflow(name="test-workflow", os_family="linux")
+        session.add(workflow)
+        session.flush()
+
+        step = WorkflowStep(
+            workflow_id=workflow.id,
+            sequence=1,
+            name="Install OS",
+            type="boot",
+            config_json='{"kernel": "/vmlinuz", "initrd": "/initrd"}',
+        )
+        session.add(step)
+        session.flush()
+
+        assert step.id is not None
+        assert step.sequence == 1
+        assert step.type == "boot"
+        assert step.timeout_seconds == 3600
+        assert step.on_failure == "fail"
+
+    def test_workflow_steps_ordered(self, session):
+        """Workflow steps are returned in sequence order."""
+        workflow = Workflow(name="test-workflow", os_family="linux")
+        session.add(workflow)
+        session.flush()
+
+        step3 = WorkflowStep(workflow_id=workflow.id, sequence=3, name="Step 3", type="reboot")
+        step1 = WorkflowStep(workflow_id=workflow.id, sequence=1, name="Step 1", type="boot")
+        step2 = WorkflowStep(workflow_id=workflow.id, sequence=2, name="Step 2", type="script")
+        session.add_all([step3, step1, step2])
+        session.flush()
+
+        session.refresh(workflow)
+        assert [s.name for s in workflow.steps] == ["Step 1", "Step 2", "Step 3"]
+
+    def test_workflow_step_default_values(self, session):
+        """WorkflowStep has correct default values."""
+        workflow = Workflow(name="test-workflow", os_family="linux")
+        session.add(workflow)
+        session.flush()
+
+        step = WorkflowStep(
+            workflow_id=workflow.id,
+            sequence=1,
+            name="Test Step",
+            type="script",
+        )
+        session.add(step)
+        session.flush()
+
+        assert step.config_json == "{}"
+        assert step.timeout_seconds == 3600
+        assert step.on_failure == "fail"
+        assert step.max_retries == 3
+        assert step.retry_delay_seconds == 30
+        assert step.next_state is None
+        assert step.rollback_step_id is None
+
+    def test_workflow_step_unique_sequence(self, session):
+        """WorkflowStep enforces unique sequence per workflow."""
+        workflow = Workflow(name="test-workflow", os_family="linux")
+        session.add(workflow)
+        session.flush()
+
+        step1 = WorkflowStep(workflow_id=workflow.id, sequence=1, name="Step 1", type="boot")
+        session.add(step1)
+        session.flush()
+
+        step2 = WorkflowStep(workflow_id=workflow.id, sequence=1, name="Step 1 Dup", type="boot")
+        session.add(step2)
+
+        with pytest.raises(Exception):  # IntegrityError
+            session.flush()
+
+    def test_workflow_step_cascade_delete(self, session):
+        """Steps are deleted when workflow is deleted."""
+        workflow = Workflow(name="test-workflow", os_family="linux")
+        session.add(workflow)
+        session.flush()
+
+        step = WorkflowStep(workflow_id=workflow.id, sequence=1, name="Step 1", type="boot")
+        session.add(step)
+        session.flush()
+
+        step_id = step.id
+        session.delete(workflow)
+        session.flush()
+
+        assert session.get(WorkflowStep, step_id) is None
+
+    def test_workflow_step_relationship(self, session):
+        """WorkflowStep has relationship to Workflow."""
+        workflow = Workflow(name="test-workflow", os_family="linux")
+        session.add(workflow)
+        session.flush()
+
+        step = WorkflowStep(workflow_id=workflow.id, sequence=1, name="Step 1", type="boot")
+        session.add(step)
+        session.flush()
+
+        assert step.workflow.name == "test-workflow"
+        assert step in workflow.steps
+
+    def test_workflow_step_failure_options(self, session):
+        """WorkflowStep supports different failure handling options."""
+        workflow = Workflow(name="test-workflow", os_family="linux")
+        session.add(workflow)
+        session.flush()
+
+        step = WorkflowStep(
+            workflow_id=workflow.id,
+            sequence=1,
+            name="Retry Step",
+            type="script",
+            on_failure="retry",
+            max_retries=5,
+            retry_delay_seconds=60,
+        )
+        session.add(step)
+        session.flush()
+
+        assert step.on_failure == "retry"
+        assert step.max_retries == 5
+        assert step.retry_delay_seconds == 60
+
+    def test_workflow_step_state_transition(self, session):
+        """WorkflowStep can specify next node state."""
+        workflow = Workflow(name="test-workflow", os_family="linux")
+        session.add(workflow)
+        session.flush()
+
+        step = WorkflowStep(
+            workflow_id=workflow.id,
+            sequence=1,
+            name="Final Step",
+            type="reboot",
+            next_state="active",
+        )
+        session.add(step)
+        session.flush()
+
+        assert step.next_state == "active"
