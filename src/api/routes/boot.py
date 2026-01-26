@@ -442,7 +442,8 @@ async def get_boot_script(
         )
         db.add(node)
         await db.flush()
-        return generate_discovery_script(mac, server)
+        # Boot from local disk - node is now registered and will be managed
+        return generate_local_boot_script()
 
     # Update last seen and hardware info
     node.last_seen_at = datetime.now(timezone.utc)
@@ -459,8 +460,9 @@ async def get_boot_script(
 
     # Return boot script based on state
     match node.state:
-        case "discovered":
-            return generate_discovery_script(mac, server)
+        case "discovered" | "ignored":
+            # Boot from local disk - node is known but not ready for provisioning
+            return generate_local_boot_script()
         case "pending":
             # Check if workflow is assigned
             if not node.workflow_id:
