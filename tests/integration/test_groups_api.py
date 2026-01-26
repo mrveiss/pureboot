@@ -226,3 +226,107 @@ class TestGroupHierarchy:
         names = [g["name"] for g in data["data"]]
         assert "web" in names
         assert "db" in names
+
+    def test_move_group_to_new_parent(self, client: TestClient):
+        """Move group to a new parent."""
+        # Create structure: servers, databases, web (under servers)
+        servers_resp = client.post("/api/v1/groups", json={"name": "servers"})
+        servers_id = servers_resp.json()["data"]["id"]
+
+        db_resp = client.post("/api/v1/groups", json={"name": "databases"})
+        db_id = db_resp.json()["data"]["id"]
+
+        web_resp = client.post(
+            "/api/v1/groups", json={"name": "web", "parent_id": servers_id}
+        )
+        web_id = web_resp.json()["data"]["id"]
+
+        # Move web under databases
+        response = client.patch(
+            f"/api/v1/groups/{web_id}",
+            json={"parent_id": db_id},
+        )
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["parent_id"] == db_id
+        assert data["path"] == "/databases/web"
+        assert data["depth"] == 1
+
+    def test_move_group_to_root(self, client: TestClient):
+        """Move group to root level."""
+        parent_resp = client.post("/api/v1/groups", json={"name": "servers"})
+        parent_id = parent_resp.json()["data"]["id"]
+
+        child_resp = client.post(
+            "/api/v1/groups", json={"name": "web", "parent_id": parent_id}
+        )
+        child_id = child_resp.json()["data"]["id"]
+
+        # Move to root (parent_id = null via empty string or explicit null)
+        response = client.patch(
+            f"/api/v1/groups/{child_id}",
+            json={"parent_id": None},
+        )
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["parent_id"] is None
+        assert data["path"] == "/web"
+        assert data["depth"] == 0
+
+    def test_move_group_updates_descendants(self, client: TestClient):
+        """Moving group updates all descendant paths."""
+        # Create: servers -> web -> prod
+        servers_resp = client.post("/api/v1/groups", json={"name": "servers"})
+        servers_id = servers_resp.json()["data"]["id"]
+
+        web_resp = client.post(
+            "/api/v1/groups", json={"name": "web", "parent_id": servers_id}
+        )
+        web_id = web_resp.json()["data"]["id"]
+
+        prod_resp = client.post(
+            "/api/v1/groups", json={"name": "prod", "parent_id": web_id}
+        )
+        prod_id = prod_resp.json()["data"]["id"]
+
+        # Create new parent
+        other_resp = client.post("/api/v1/groups", json={"name": "other"})
+        other_id = other_resp.json()["data"]["id"]
+
+        # Move web under other
+        client.patch(f"/api/v1/groups/{web_id}", json={"parent_id": other_id})
+
+        # Check prod was updated
+        response = client.get(f"/api/v1/groups/{prod_id}")
+        data = response.json()["data"]
+        assert data["path"] == "/other/web/prod"
+        assert data["depth"] == 2
+
+    def test_move_group_circular_reference_fails(self, client: TestClient):
+        """Cannot move group under its own descendant."""
+        parent_resp = client.post("/api/v1/groups", json={"name": "servers"})
+        parent_id = parent_resp.json()["data"]["id"]
+
+        child_resp = client.post(
+            "/api/v1/groups", json={"name": "web", "parent_id": parent_id}
+        )
+        child_id = child_resp.json()["data"]["id"]
+
+        # Try to move parent under child
+        response = client.patch(
+            f"/api/v1/groups/{parent_id}",
+            json={"parent_id": child_id},
+        )
+        assert response.status_code == 400
+        assert "Cannot move" in response.json()["detail"]
+
+    def test_move_group_to_self_fails(self, client: TestClient):
+        """Cannot set group as its own parent."""
+        resp = client.post("/api/v1/groups", json={"name": "servers"})
+        group_id = resp.json()["data"]["id"]
+
+        response = client.patch(
+            f"/api/v1/groups/{group_id}",
+            json={"parent_id": group_id},
+        )
+        assert response.status_code == 400

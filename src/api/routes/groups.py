@@ -166,6 +166,7 @@ async def update_group(
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
+    # Check for name conflict
     if group_data.name and group_data.name != group.name:
         existing = await db.execute(
             select(DeviceGroup).where(DeviceGroup.name == group_data.name)
@@ -176,18 +177,110 @@ async def update_group(
                 detail=f"Group '{group_data.name}' already exists",
             )
 
+    # Handle parent change (reparent)
     update_data = group_data.model_dump(exclude_unset=True)
+    if "parent_id" in update_data:
+        new_parent_id = update_data["parent_id"]
+        old_path = group.path
+
+        # Cannot be own parent
+        if new_parent_id == group_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot set group as its own parent",
+            )
+
+        if new_parent_id:
+            # Validate new parent exists
+            parent_result = await db.execute(
+                select(DeviceGroup).where(DeviceGroup.id == new_parent_id)
+            )
+            new_parent = parent_result.scalar_one_or_none()
+            if not new_parent:
+                raise HTTPException(status_code=404, detail="Parent group not found")
+
+            # Prevent circular reference
+            if new_parent.path.startswith(group.path + "/") or new_parent.id == group_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot move group under itself or its descendant",
+                )
+
+            # Compute new path
+            new_name = update_data.get("name", group.name)
+            new_path = f"{new_parent.path}/{new_name}"
+            new_depth = new_parent.depth + 1
+        else:
+            # Moving to root
+            new_name = update_data.get("name", group.name)
+            new_path = f"/{new_name}"
+            new_depth = 0
+
+        # Update descendants' paths
+        depth_diff = new_depth - group.depth
+        descendants_result = await db.execute(
+            select(DeviceGroup).where(
+                DeviceGroup.path.startswith(old_path + "/")
+            )
+        )
+        descendants = descendants_result.scalars().all()
+        for desc in descendants:
+            desc.path = desc.path.replace(old_path, new_path, 1)
+            desc.depth = desc.depth + depth_diff
+
+        group.path = new_path
+        group.depth = new_depth
+        group.parent_id = new_parent_id
+
+        # Remove parent_id from update_data since we handled it
+        del update_data["parent_id"]
+
+    # Handle name change (update path if not already handled by reparent)
+    if "name" in update_data and "parent_id" not in group_data.model_dump(exclude_unset=True):
+        old_path = group.path
+        if group.parent_id:
+            # Get parent path
+            parent_result = await db.execute(
+                select(DeviceGroup).where(DeviceGroup.id == group.parent_id)
+            )
+            parent = parent_result.scalar_one()
+            new_path = f"{parent.path}/{update_data['name']}"
+        else:
+            new_path = f"/{update_data['name']}"
+
+        # Update descendants' paths
+        descendants_result = await db.execute(
+            select(DeviceGroup).where(
+                DeviceGroup.path.startswith(old_path + "/")
+            )
+        )
+        descendants = descendants_result.scalars().all()
+        for desc in descendants:
+            desc.path = desc.path.replace(old_path, new_path, 1)
+
+        group.path = new_path
+
+    # Apply remaining updates
     for field, value in update_data.items():
         setattr(group, field, value)
 
     await db.flush()
 
+    # Get counts
     count_query = select(func.count(Node.id)).where(Node.group_id == group_id)
     count_result = await db.execute(count_query)
     node_count = count_result.scalar() or 0
 
+    children_query = select(func.count(DeviceGroup.id)).where(
+        DeviceGroup.parent_id == group_id
+    )
+    children_result = await db.execute(children_query)
+    children_count = children_result.scalar() or 0
+
     return ApiResponse(
-        data=DeviceGroupResponse.from_group(group, node_count=node_count),
+        data=DeviceGroupResponse.from_group(
+            group, node_count=node_count, children_count=children_count
+        ),
         message="Group updated successfully",
     )
 
