@@ -65,7 +65,7 @@ export function PartitionTable({
   const getPartitionOperations = (partitionNumber: number): PartitionOperation[] => {
     return pendingOperations.filter(op => {
       const params = op.params as Record<string, unknown>
-      return params.partition_number === partitionNumber
+      return params.partition === partitionNumber
     })
   }
 

@@ -315,8 +315,8 @@ execute_pending_ops() {
     local success_count=0
     local fail_count=0
 
-    # Get number of operations
-    operations_count=$(echo "${ops_json}" | jq '.operations | length' 2>/dev/null || echo "0")
+    # Get number of operations (API returns .data array)
+    operations_count=$(echo "${ops_json}" | jq '.data | length' 2>/dev/null || echo "0")
 
     if [[ "${operations_count}" -eq 0 ]]; then
         log_debug "No pending operations"
@@ -329,7 +329,7 @@ execute_pending_ops() {
     local i
     for ((i = 0; i < operations_count; i++)); do
         local op
-        op=$(echo "${ops_json}" | jq -c ".operations[${i}]")
+        op=$(echo "${ops_json}" | jq -c ".data[${i}]")
 
         if execute_operation "${op}"; then
             ((success_count++))
@@ -380,7 +380,7 @@ main_loop() {
         if pending_ops=$(poll_operations); then
             # Check if there are operations to execute
             local op_count
-            op_count=$(echo "${pending_ops}" | jq '.operations | length' 2>/dev/null || echo "0")
+            op_count=$(echo "${pending_ops}" | jq '.data | length' 2>/dev/null || echo "0")
 
             if [[ "${op_count}" -gt 0 ]]; then
                 # Execute pending operations

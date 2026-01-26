@@ -71,17 +71,17 @@ function getOperationDescription(operation: PartitionOperation): string {
 
   switch (operation.operation) {
     case 'resize':
-      return `Resize partition ${params.partition_number} to ${formatSize(params.new_size_bytes as number)}`
+      return `Resize partition ${params.partition} to ${formatSize(params.new_size_bytes as number)}`
     case 'create':
       return `Create ${params.filesystem} partition (${formatSize((params.end_bytes as number) - (params.start_bytes as number))})`
     case 'delete':
-      return `Delete partition ${params.partition_number}`
+      return `Delete partition ${params.partition}`
     case 'format':
-      return `Format partition ${params.partition_number} as ${params.filesystem}${params.label ? ` (${params.label})` : ''}`
+      return `Format partition ${params.partition} as ${params.filesystem}${params.label ? ` (${params.label})` : ''}`
     case 'move':
-      return `Move partition ${params.partition_number}`
+      return `Move partition ${params.partition}`
     case 'set_flag':
-      return `${(params.state as boolean) ? 'Set' : 'Unset'} ${params.flag} flag on partition ${params.partition_number}`
+      return `${(params.state as boolean) ? 'Set' : 'Unset'} ${params.flag} flag on partition ${params.partition}`
     default:
       return `Unknown operation on ${operation.device}`
   }

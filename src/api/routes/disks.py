@@ -572,3 +572,141 @@ async def update_operation_status(
         },
         message=f"Operation status updated to {status_update.status}",
     )
+
+
+# ============== Node-Level Operation Endpoints ==============
+
+
+class PartitionModeStatus(BaseModel):
+    """Request body for partition mode status update."""
+
+    status: str  # online, offline
+    device: str | None = None  # Currently selected device if any
+
+
+@router.get(
+    "/nodes/{node_id}/partition-operations",
+    response_model=ApiListResponse[PartitionOperationResponse],
+)
+async def list_all_node_partition_operations(
+    node_id: str,
+    status: str | None = Query(None, description="Filter by status"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    List all partition operations for a node across all devices.
+
+    This endpoint is used by nodes polling for pending operations.
+    """
+    # Verify node exists
+    result = await db.execute(select(Node).where(Node.id == node_id))
+    node = result.scalar_one_or_none()
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    # Build query for all operations for this node
+    query = select(PartitionOperation).where(PartitionOperation.node_id == node_id)
+
+    if status:
+        valid_statuses = {"pending", "running", "completed", "failed"}
+        if status not in valid_statuses:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid status. Must be one of: {', '.join(sorted(valid_statuses))}",
+            )
+        query = query.where(PartitionOperation.status == status)
+
+    query = query.order_by(PartitionOperation.device, PartitionOperation.sequence)
+
+    result = await db.execute(query)
+    operations = result.scalars().all()
+
+    return ApiListResponse(
+        data=[PartitionOperationResponse.from_operation(op) for op in operations],
+        total=len(operations),
+    )
+
+
+@router.post(
+    "/nodes/{node_id}/partition-mode/status",
+    response_model=ApiResponse[dict],
+)
+async def update_partition_mode_status(
+    node_id: str,
+    status_update: PartitionModeStatus,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Update partition mode status for a node.
+
+    Called by nodes when entering or exiting partition management mode.
+    """
+    # Verify node exists
+    result = await db.execute(select(Node).where(Node.id == node_id))
+    node = result.scalar_one_or_none()
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    # Validate status
+    valid_statuses = {"online", "offline"}
+    if status_update.status not in valid_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status. Must be one of: {', '.join(sorted(valid_statuses))}",
+        )
+
+    # Broadcast status change event
+    event_type = (
+        "partition.mode_online"
+        if status_update.status == "online"
+        else "partition.mode_offline"
+    )
+    await global_ws_manager.broadcast(
+        event_type,
+        {
+            "node_id": node_id,
+            "mac_address": node.mac_address,
+            "status": status_update.status,
+            "device": status_update.device,
+        },
+    )
+
+    return ApiResponse(
+        data={
+            "node_id": node_id,
+            "status": status_update.status,
+        },
+        message=f"Partition mode status updated to {status_update.status}",
+    )
+
+
+@router.post(
+    "/nodes/{node_id}/partition-mode/heartbeat",
+    response_model=ApiResponse[dict],
+)
+async def partition_mode_heartbeat(
+    node_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Receive heartbeat from a node in partition management mode.
+
+    Nodes send periodic heartbeats to indicate they are still active.
+    """
+    # Verify node exists
+    result = await db.execute(select(Node).where(Node.id == node_id))
+    node = result.scalar_one_or_none()
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    # Update last_seen timestamp
+    node.last_seen = datetime.now(timezone.utc)
+    await db.flush()
+
+    return ApiResponse(
+        data={
+            "node_id": node_id,
+            "received_at": datetime.now(timezone.utc).isoformat(),
+        },
+        message="Heartbeat received",
+    )

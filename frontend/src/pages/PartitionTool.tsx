@@ -180,7 +180,7 @@ export function PartitionTool() {
     const operation: PartitionOperationRequest = {
       operation: 'resize',
       params: {
-        partition_number: selectedPartition.number,
+        partition: selectedPartition.number,
         new_size_bytes: newSizeBytes,
       },
     }
@@ -204,7 +204,7 @@ export function PartitionTool() {
     const operation: PartitionOperationRequest = {
       operation: 'format',
       params: {
-        partition_number: selectedPartition.number,
+        partition: selectedPartition.number,
         filesystem,
         label,
       },
@@ -229,7 +229,7 @@ export function PartitionTool() {
     const operation: PartitionOperationRequest = {
       operation: 'delete',
       params: {
-        partition_number: selectedPartition.number,
+        partition: selectedPartition.number,
       },
     }
 

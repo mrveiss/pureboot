@@ -88,7 +88,7 @@ export interface PartitionOperation {
  * Parameters for resize operation.
  */
 export interface ResizeOperationParams {
-  partition_number: number
+  partition: number
   new_size_bytes: number
 }
 
@@ -107,14 +107,14 @@ export interface CreateOperationParams {
  * Parameters for delete operation.
  */
 export interface DeleteOperationParams {
-  partition_number: number
+  partition: number
 }
 
 /**
  * Parameters for format operation.
  */
 export interface FormatOperationParams {
-  partition_number: number
+  partition: number
   filesystem: string
   label?: string
 }
@@ -123,7 +123,7 @@ export interface FormatOperationParams {
  * Parameters for move operation.
  */
 export interface MoveOperationParams {
-  partition_number: number
+  partition: number
   new_start_bytes: number
 }
 
@@ -131,7 +131,7 @@ export interface MoveOperationParams {
  * Parameters for set_flag operation.
  */
 export interface SetFlagOperationParams {
-  partition_number: number
+  partition: number
   flag: string
   state: boolean
 }
