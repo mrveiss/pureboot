@@ -3,6 +3,7 @@ import json
 import logging
 from pathlib import Path
 
+import yaml
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -21,13 +22,14 @@ class Workflow(BaseModel):
 
     id: str
     name: str
+    description: str = ""
     kernel_path: str = ""
     initrd_path: str = ""
     cmdline: str = ""
     architecture: str = "x86_64"
     boot_mode: str = "bios"
     # Install method: "kernel" (default), "sanboot" (ISO), "chain" (chainload URL),
-    # "image" (disk image), "clone" (clone from source node)
+    # "image" (disk image), "deploy" (clone/partition environment)
     install_method: str = "kernel"
     # For sanboot/chain: the URL to boot from
     boot_url: str = ""
@@ -38,6 +40,8 @@ class Workflow(BaseModel):
     source_device: str = "/dev/sda"
     # Post-deploy script URL (optional)
     post_script_url: str = ""
+    # Boot parameters as key-value pairs (for deploy environments)
+    boot_params: dict[str, str] = {}
 
 
 class WorkflowService:
@@ -47,35 +51,47 @@ class WorkflowService:
         """Initialize with workflows directory path."""
         self.workflows_dir = workflows_dir
 
-    def _validate_workflow_path(self, workflow_id: str) -> Path:
+    def _validate_workflow_path(self, workflow_id: str) -> Path | None:
         """
         Validate and return safe workflow file path.
 
         Args:
-            workflow_id: Workflow identifier (filename without .json)
+            workflow_id: Workflow identifier (filename without extension)
 
         Returns:
-            Validated Path to workflow file
+            Validated Path to workflow file, or None if not found
 
         Raises:
             ValueError: If workflow_id contains path traversal sequences
         """
-        # Resolve the path to catch traversal attempts
-        workflow_path = (self.workflows_dir / f"{workflow_id}.json").resolve()
         workflows_dir_resolved = self.workflows_dir.resolve()
 
-        # Ensure the path is within the workflows directory
-        if not str(workflow_path).startswith(str(workflows_dir_resolved) + "/"):
-            raise ValueError(f"Invalid workflow_id: {workflow_id}")
+        # Check for both JSON and YAML extensions
+        for ext in [".json", ".yaml", ".yml"]:
+            workflow_path = (self.workflows_dir / f"{workflow_id}{ext}").resolve()
 
-        return workflow_path
+            # Ensure the path is within the workflows directory
+            if not str(workflow_path).startswith(str(workflows_dir_resolved) + "/"):
+                raise ValueError(f"Invalid workflow_id: {workflow_id}")
+
+            if workflow_path.exists():
+                return workflow_path
+
+        return None
+
+    def _load_workflow_file(self, path: Path) -> dict:
+        """Load workflow data from JSON or YAML file."""
+        content = path.read_text()
+        if path.suffix in [".yaml", ".yml"]:
+            return yaml.safe_load(content)
+        return json.loads(content)
 
     def get_workflow(self, workflow_id: str) -> Workflow:
         """
         Load workflow definition by ID.
 
         Args:
-            workflow_id: Workflow identifier (filename without .json)
+            workflow_id: Workflow identifier (filename without extension)
 
         Returns:
             Workflow object
@@ -86,13 +102,13 @@ class WorkflowService:
         """
         workflow_path = self._validate_workflow_path(workflow_id)
 
-        if not workflow_path.exists():
+        if workflow_path is None:
             raise WorkflowNotFoundError(workflow_id)
 
         try:
-            data = json.loads(workflow_path.read_text())
+            data = self._load_workflow_file(workflow_path)
             return Workflow(**data)
-        except (json.JSONDecodeError, ValueError) as e:
+        except (json.JSONDecodeError, yaml.YAMLError, ValueError) as e:
             logger.error(f"Failed to load workflow {workflow_id}: {e}")
             raise WorkflowNotFoundError(workflow_id) from e
 
@@ -107,13 +123,21 @@ class WorkflowService:
             return []
 
         workflows = []
-        for path in self.workflows_dir.glob("*.json"):
-            try:
-                data = json.loads(path.read_text())
-                workflows.append(Workflow(**data))
-            except (json.JSONDecodeError, ValueError) as e:
-                logger.warning(f"Skipping invalid workflow {path.name}: {e}")
-                continue
+        seen_ids = set()
+
+        # Scan for JSON, YAML, and YML files
+        for pattern in ["*.json", "*.yaml", "*.yml"]:
+            for path in self.workflows_dir.glob(pattern):
+                try:
+                    data = self._load_workflow_file(path)
+                    workflow = Workflow(**data)
+                    # Avoid duplicates if same ID exists in multiple formats
+                    if workflow.id not in seen_ids:
+                        workflows.append(workflow)
+                        seen_ids.add(workflow.id)
+                except (json.JSONDecodeError, yaml.YAMLError, ValueError) as e:
+                    logger.warning(f"Skipping invalid workflow {path.name}: {e}")
+                    continue
 
         return workflows
 

@@ -1,11 +1,14 @@
 export interface Workflow {
   id: string
   name: string
+  description?: string
   kernel_path: string
   initrd_path: string
   cmdline: string
   architecture: 'x86_64' | 'aarch64' | 'armv7l'
   boot_mode: 'bios' | 'uefi'
+  install_method?: 'kernel' | 'sanboot' | 'chain' | 'image' | 'deploy'
+  boot_params?: Record<string, string>
 }
 
 export const ARCHITECTURE_LABELS: Record<string, string> = {

@@ -20,11 +20,14 @@ async def list_workflows():
             WorkflowResponse(
                 id=w.id,
                 name=w.name,
+                description=w.description,
                 kernel_path=w.kernel_path,
                 initrd_path=w.initrd_path,
                 cmdline=w.cmdline,
                 architecture=w.architecture,
                 boot_mode=w.boot_mode,
+                install_method=w.install_method,
+                boot_params=w.boot_params,
             )
             for w in workflows
         ],
@@ -41,11 +44,14 @@ async def get_workflow(workflow_id: str):
             data=WorkflowResponse(
                 id=workflow.id,
                 name=workflow.name,
+                description=workflow.description,
                 kernel_path=workflow.kernel_path,
                 initrd_path=workflow.initrd_path,
                 cmdline=workflow.cmdline,
                 architecture=workflow.architecture,
                 boot_mode=workflow.boot_mode,
+                install_method=workflow.install_method,
+                boot_params=workflow.boot_params,
             )
         )
     except ValueError:

@@ -1089,11 +1089,14 @@ class WorkflowResponse(BaseModel):
 
     id: str
     name: str
-    kernel_path: str
-    initrd_path: str
-    cmdline: str
+    description: str = ""
+    kernel_path: str = ""
+    initrd_path: str = ""
+    cmdline: str = ""
     architecture: str = "x86_64"
     boot_mode: str = "bios"
+    install_method: str = "kernel"
+    boot_params: dict[str, str] = {}
 
 
 class WorkflowListResponse(BaseModel):
