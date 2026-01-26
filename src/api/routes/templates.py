@@ -1,12 +1,15 @@
 """Template management API endpoints."""
+import hashlib
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.db.database import get_db
-from src.db.models import Template, StorageBackend
+from src.db.models import Template, StorageBackend, TemplateVersion
 
 router = APIRouter()
 
@@ -93,6 +96,57 @@ class ApiResponse(BaseModel):
     success: bool = True
     message: str | None = None
     data: TemplateResponse | None = None
+
+
+# --- Template Version Schemas ---
+
+
+class TemplateVersionCreate(BaseModel):
+    """Request body for creating a template version."""
+    content: str = Field(..., max_length=10_000_000)  # 10MB limit
+    commit_message: str | None = None
+
+
+class TemplateVersionResponse(BaseModel):
+    """Template version response."""
+    id: str
+    template_id: str
+    major: int
+    minor: int
+    version_string: str
+    content: str
+    content_hash: str
+    size_bytes: int | None
+    commit_message: str | None
+    created_at: str
+
+    @classmethod
+    def from_version(cls, version: TemplateVersion) -> "TemplateVersionResponse":
+        return cls(
+            id=version.id,
+            template_id=version.template_id,
+            major=version.major,
+            minor=version.minor,
+            version_string=version.version_string,
+            content=version.content,
+            content_hash=version.content_hash,
+            size_bytes=version.size_bytes,
+            commit_message=version.commit_message,
+            created_at=version.created_at.isoformat() if version.created_at else "",
+        )
+
+
+class TemplateVersionListResponse(BaseModel):
+    """Response for list of template versions."""
+    data: list[TemplateVersionResponse]
+    total: int
+
+
+class VersionApiResponse(BaseModel):
+    """API response for template version operations."""
+    success: bool = True
+    message: str | None = None
+    data: TemplateVersionResponse | None = None
 
 
 # --- Endpoints ---
@@ -308,4 +362,198 @@ async def delete_template(
     return ApiResponse(
         data=response,
         message="Template deleted successfully",
+    )
+
+
+# --- Template Version Endpoints ---
+
+
+def parse_version_string(version_str: str) -> tuple[int, int] | None:
+    """Parse a version string like 'v1.0', 'v1', '1.0' into (major, minor).
+
+    Returns None if the version string cannot be parsed.
+    """
+    # Handle various formats: v1.0, v1, 1.0, 1
+    match = re.match(r'^v?(\d+)(?:\.(\d+))?$', version_str)
+    if not match:
+        return None
+    major = int(match.group(1))
+    minor = int(match.group(2)) if match.group(2) else 0
+    return (major, minor)
+
+
+def compute_content_hash(content: str) -> str:
+    """Compute SHA256 hash of content."""
+    return hashlib.sha256(content.encode('utf-8')).hexdigest()
+
+
+@router.post(
+    "/templates/{template_id}/versions",
+    response_model=VersionApiResponse,
+    status_code=201,
+)
+async def create_template_version(
+    template_id: str,
+    data: TemplateVersionCreate,
+    bump: str = Query("minor", description="Version bump type: 'major' or 'minor'"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a new version of a template.
+
+    If this is the first version, it will be v1.0.
+    Otherwise, it will increment based on the bump parameter:
+    - bump=minor: increments minor version (e.g., v1.0 -> v1.1)
+    - bump=major: increments major version and resets minor to 0 (e.g., v1.5 -> v2.0)
+    """
+    # Find the template
+    result = await db.execute(
+        select(Template)
+        .options(selectinload(Template.versions))
+        .where(Template.id == template_id)
+    )
+    template = result.scalar_one_or_none()
+
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    # Validate bump parameter
+    if bump not in ("major", "minor"):
+        raise HTTPException(status_code=400, detail="Invalid bump type. Must be 'major' or 'minor'")
+
+    # Determine version numbers
+    if not template.versions:
+        # First version
+        major, minor = 1, 0
+    else:
+        # Find the highest version
+        latest_version = max(
+            template.versions,
+            key=lambda v: (v.major, v.minor)
+        )
+        if bump == "major":
+            major = latest_version.major + 1
+            minor = 0
+        else:
+            major = latest_version.major
+            minor = latest_version.minor + 1
+
+    # Create the version
+    content_hash = compute_content_hash(data.content)
+    version = TemplateVersion(
+        template_id=template_id,
+        major=major,
+        minor=minor,
+        content=data.content,
+        content_hash=content_hash,
+        size_bytes=len(data.content.encode('utf-8')),
+        commit_message=data.commit_message,
+    )
+    db.add(version)
+    await db.flush()
+
+    # Update template's current version
+    template.current_version_id = version.id
+    await db.flush()
+
+    return VersionApiResponse(
+        data=TemplateVersionResponse.from_version(version),
+        message=f"Template version {version.version_string} created successfully",
+    )
+
+
+@router.get(
+    "/templates/{template_id}/versions",
+    response_model=TemplateVersionListResponse,
+)
+async def list_template_versions(
+    template_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """List all versions of a template."""
+    # Verify template exists
+    result = await db.execute(
+        select(Template).where(Template.id == template_id)
+    )
+    template = result.scalar_one_or_none()
+
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    # Get all versions
+    result = await db.execute(
+        select(TemplateVersion)
+        .where(TemplateVersion.template_id == template_id)
+        .order_by(TemplateVersion.major.desc(), TemplateVersion.minor.desc())
+    )
+    versions = result.scalars().all()
+
+    return TemplateVersionListResponse(
+        data=[TemplateVersionResponse.from_version(v) for v in versions],
+        total=len(versions),
+    )
+
+
+@router.get(
+    "/templates/{template_id}/versions/{version}",
+    response_model=VersionApiResponse,
+)
+async def get_template_version(
+    template_id: str,
+    version: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a specific version of a template.
+
+    The version can be:
+    - 'latest': Returns the template's current version
+    - A version string like 'v1.0', 'v1', '1.0', '1'
+    """
+    # Verify template exists
+    result = await db.execute(
+        select(Template).where(Template.id == template_id)
+    )
+    template = result.scalar_one_or_none()
+
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    if version.lower() == "latest":
+        if not template.current_version_id:
+            raise HTTPException(
+                status_code=404,
+                detail="No versions available for this template"
+            )
+        result = await db.execute(
+            select(TemplateVersion)
+            .where(TemplateVersion.id == template.current_version_id)
+        )
+        template_version = result.scalar_one_or_none()
+    else:
+        # Parse version string
+        parsed = parse_version_string(version)
+        if parsed is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid version format: {version}"
+            )
+        major, minor = parsed
+
+        result = await db.execute(
+            select(TemplateVersion)
+            .where(
+                TemplateVersion.template_id == template_id,
+                TemplateVersion.major == major,
+                TemplateVersion.minor == minor,
+            )
+        )
+        template_version = result.scalar_one_or_none()
+
+    if not template_version:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Version {version} not found for this template"
+        )
+
+    return VersionApiResponse(
+        data=TemplateVersionResponse.from_version(template_version),
     )
