@@ -8,6 +8,8 @@ from src.api.schemas import (
     StateTransition,
     TagCreate,
     DeviceGroupCreate,
+    DeviceGroupUpdate,
+    DeviceGroupResponse,
     NodeReport,
 )
 
@@ -123,12 +125,53 @@ class TestDeviceGroupCreate:
         """Valid group accepted."""
         group = DeviceGroupCreate(name="webservers")
         assert group.name == "webservers"
-        assert group.auto_provision is False
+        assert group.auto_provision is None
 
     def test_empty_name_rejected(self):
         """Empty name rejected."""
         with pytest.raises(ValidationError):
             DeviceGroupCreate(name="")
+
+
+class TestDeviceGroupSchemas:
+    """Test DeviceGroup schema changes for hierarchy."""
+
+    def test_create_with_parent_id(self):
+        """DeviceGroupCreate accepts parent_id."""
+        data = DeviceGroupCreate(name="webservers", parent_id="parent-uuid")
+        assert data.parent_id == "parent-uuid"
+
+    def test_create_auto_provision_nullable(self):
+        """DeviceGroupCreate auto_provision can be None."""
+        data = DeviceGroupCreate(name="webservers", auto_provision=None)
+        assert data.auto_provision is None
+
+    def test_update_with_parent_id(self):
+        """DeviceGroupUpdate accepts parent_id."""
+        data = DeviceGroupUpdate(parent_id="new-parent-uuid")
+        assert data.parent_id == "new-parent-uuid"
+
+    def test_response_has_hierarchy_fields(self):
+        """DeviceGroupResponse includes hierarchy fields."""
+        # Create mock group-like object
+        class MockGroup:
+            id = "uuid"
+            name = "webservers"
+            description = None
+            parent_id = "parent-uuid"
+            path = "/servers/webservers"
+            depth = 1
+            default_workflow_id = None
+            auto_provision = None
+            created_at = "2026-01-26T00:00:00"
+            updated_at = "2026-01-26T00:00:00"
+
+        resp = DeviceGroupResponse.from_group(MockGroup(), node_count=5, children_count=2)
+        assert resp.parent_id == "parent-uuid"
+        assert resp.path == "/servers/webservers"
+        assert resp.depth == 1
+        assert resp.children_count == 2
+        assert resp.effective_auto_provision is False  # Default when None
 
 
 class TestNodeReport:

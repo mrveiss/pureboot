@@ -266,8 +266,9 @@ class DeviceGroupCreate(BaseModel):
 
     name: str
     description: str | None = None
+    parent_id: str | None = None
     default_workflow_id: str | None = None
-    auto_provision: bool = False
+    auto_provision: bool | None = None
 
     @field_validator("name")
     @classmethod
@@ -283,6 +284,7 @@ class DeviceGroupUpdate(BaseModel):
 
     name: str | None = None
     description: str | None = None
+    parent_id: str | None = None
     default_workflow_id: str | None = None
     auto_provision: bool | None = None
 
@@ -295,24 +297,55 @@ class DeviceGroupResponse(BaseModel):
     id: str
     name: str
     description: str | None
+
+    # Hierarchy
+    parent_id: str | None
+    path: str
+    depth: int
+    children_count: int = 0
+
+    # Own settings (may be None = inherit)
     default_workflow_id: str | None
-    auto_provision: bool
+    auto_provision: bool | None
+
+    # Effective settings (computed)
+    effective_workflow_id: str | None = None
+    effective_auto_provision: bool = False
+
+    # Metadata
+    node_count: int = 0
     created_at: datetime
     updated_at: datetime
-    node_count: int = 0
 
     @classmethod
-    def from_group(cls, group, node_count: int = 0) -> "DeviceGroupResponse":
+    def from_group(
+        cls,
+        group,
+        node_count: int = 0,
+        children_count: int = 0,
+        effective_workflow_id: str | None = None,
+        effective_auto_provision: bool = False,
+    ) -> "DeviceGroupResponse":
         """Create response from DeviceGroup model."""
         return cls(
             id=group.id,
             name=group.name,
             description=group.description,
+            parent_id=group.parent_id,
+            path=group.path,
+            depth=group.depth,
+            children_count=children_count,
             default_workflow_id=group.default_workflow_id,
             auto_provision=group.auto_provision,
+            effective_workflow_id=effective_workflow_id
+            if effective_workflow_id
+            else group.default_workflow_id,
+            effective_auto_provision=effective_auto_provision
+            if group.auto_provision is None
+            else group.auto_provision,
+            node_count=node_count,
             created_at=group.created_at,
             updated_at=group.updated_at,
-            node_count=node_count,
         )
 
 
