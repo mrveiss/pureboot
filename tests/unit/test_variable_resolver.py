@@ -1,7 +1,8 @@
 """Tests for variable resolver service."""
 import pytest
 
-from src.core.variable_resolver import VariableResolver, KNOWN_NAMESPACES
+from src.core.variable_resolver import VariableResolver, KNOWN_NAMESPACES, build_context
+from src.db.models import Node, Workflow, DeviceGroup
 
 
 class TestVariableResolver:
@@ -225,3 +226,50 @@ class TestKnownNamespaces:
         """All expected namespaces are defined."""
         expected = {"node", "group", "workflow", "server", "template", "execution", "meta", "secret"}
         assert set(KNOWN_NAMESPACES.keys()) == expected
+
+
+class TestBuildContext:
+    """Test context building from models."""
+
+    def test_build_context_from_node(self, test_db):
+        """build_context creates context from Node model."""
+        node = Node(
+            mac_address="aa:bb:cc:dd:ee:ff",
+            hostname="server-01",
+            ip_address="192.168.1.100",
+        )
+        test_db.add(node)
+        test_db.flush()
+
+        context = build_context(node=node)
+
+        assert context["node"]["mac"] == "aa:bb:cc:dd:ee:ff"
+        assert context["node"]["hostname"] == "server-01"
+        assert context["node"]["ip"] == "192.168.1.100"
+
+    def test_build_context_with_group(self, test_db):
+        """build_context includes group data."""
+        group = DeviceGroup(name="production", description="Production servers")
+        test_db.add(group)
+        test_db.flush()
+
+        node = Node(mac_address="aa:bb:cc:dd:ee:ff", group_id=group.id)
+        test_db.add(node)
+        test_db.flush()
+        test_db.refresh(node)
+
+        context = build_context(node=node)
+
+        assert context["group"]["name"] == "production"
+        assert context["group"]["description"] == "Production servers"
+
+    def test_build_context_with_workflow(self, test_db):
+        """build_context includes workflow data."""
+        workflow = Workflow(name="ubuntu-2404", description="Ubuntu Server", os_family="linux")
+        test_db.add(workflow)
+        test_db.flush()
+
+        context = build_context(workflow=workflow)
+
+        assert context["workflow"]["name"] == "ubuntu-2404"
+        assert context["workflow"]["description"] == "Ubuntu Server"

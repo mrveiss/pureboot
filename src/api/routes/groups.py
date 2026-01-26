@@ -118,6 +118,42 @@ async def create_group(
     )
 
 
+async def compute_effective_settings(
+    group: DeviceGroup, db: AsyncSession
+) -> tuple[str | None, bool]:
+    """Compute effective settings by walking up ancestor chain.
+
+    Returns (effective_workflow_id, effective_auto_provision).
+    Uses simple override model: child wins if set, else inherit.
+    """
+    effective_workflow_id = group.default_workflow_id
+    effective_auto_provision = group.auto_provision
+
+    # Walk up ancestors if we still need values
+    current_id = group.parent_id
+    while current_id and (effective_workflow_id is None or effective_auto_provision is None):
+        parent_result = await db.execute(
+            select(DeviceGroup).where(DeviceGroup.id == current_id)
+        )
+        parent = parent_result.scalar_one_or_none()
+        if not parent:
+            break
+
+        if effective_workflow_id is None and parent.default_workflow_id is not None:
+            effective_workflow_id = parent.default_workflow_id
+
+        if effective_auto_provision is None and parent.auto_provision is not None:
+            effective_auto_provision = parent.auto_provision
+
+        current_id = parent.parent_id
+
+    # Default auto_provision to False if still None after inheritance
+    if effective_auto_provision is None:
+        effective_auto_provision = False
+
+    return effective_workflow_id, effective_auto_provision
+
+
 @router.get("/groups/{group_id}", response_model=ApiResponse[DeviceGroupResponse])
 async def get_group(
     group_id: str,
@@ -144,9 +180,18 @@ async def get_group(
     children_result = await db.execute(children_query)
     children_count = children_result.scalar() or 0
 
+    # Compute effective settings
+    effective_workflow_id, effective_auto_provision = await compute_effective_settings(
+        group, db
+    )
+
     return ApiResponse(
         data=DeviceGroupResponse.from_group(
-            group, node_count=node_count, children_count=children_count
+            group,
+            node_count=node_count,
+            children_count=children_count,
+            effective_workflow_id=effective_workflow_id,
+            effective_auto_provision=effective_auto_provision,
         )
     )
 
@@ -299,6 +344,20 @@ async def delete_group(
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
+    # Check for child groups
+    children_query = select(func.count(DeviceGroup.id)).where(
+        DeviceGroup.parent_id == group_id
+    )
+    children_result = await db.execute(children_query)
+    children_count = children_result.scalar() or 0
+
+    if children_count > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete group with {children_count} child group(s). Remove children first.",
+        )
+
+    # Check for nodes
     count_query = select(func.count(Node.id)).where(Node.group_id == group_id)
     count_result = await db.execute(count_query)
     node_count = count_result.scalar() or 0
@@ -318,23 +377,105 @@ async def delete_group(
     )
 
 
+@router.get("/groups/{group_id}/ancestors", response_model=ApiListResponse[DeviceGroupResponse])
+async def get_group_ancestors(
+    group_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get ancestors of a group (parent chain up to root)."""
+    result = await db.execute(
+        select(DeviceGroup).where(DeviceGroup.id == group_id)
+    )
+    group = result.scalar_one_or_none()
+
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    # Walk up the parent chain
+    ancestors = []
+    current_id = group.parent_id
+    while current_id:
+        parent_result = await db.execute(
+            select(DeviceGroup).where(DeviceGroup.id == current_id)
+        )
+        parent = parent_result.scalar_one_or_none()
+        if not parent:
+            break
+        ancestors.append(parent)
+        current_id = parent.parent_id
+
+    return ApiListResponse(
+        data=[DeviceGroupResponse.from_group(g) for g in ancestors],
+        total=len(ancestors),
+    )
+
+
+@router.get("/groups/{group_id}/descendants", response_model=ApiListResponse[DeviceGroupResponse])
+async def get_group_descendants(
+    group_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all descendants of a group (using materialized path)."""
+    result = await db.execute(
+        select(DeviceGroup).where(DeviceGroup.id == group_id)
+    )
+    group = result.scalar_one_or_none()
+
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    # Use materialized path pattern: descendants have paths starting with group.path + "/"
+    descendants_result = await db.execute(
+        select(DeviceGroup).where(
+            DeviceGroup.path.startswith(group.path + "/")
+        ).order_by(DeviceGroup.depth, DeviceGroup.name)
+    )
+    descendants = descendants_result.scalars().all()
+
+    return ApiListResponse(
+        data=[DeviceGroupResponse.from_group(g) for g in descendants],
+        total=len(descendants),
+    )
+
+
 @router.get("/groups/{group_id}/nodes", response_model=ApiListResponse[NodeResponse])
 async def list_group_nodes(
     group_id: str,
+    include_descendants: bool = Query(
+        False, description="Include nodes from descendant groups"
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """List nodes in a device group."""
     group_result = await db.execute(
         select(DeviceGroup).where(DeviceGroup.id == group_id)
     )
-    if not group_result.scalar_one_or_none():
+    group = group_result.scalar_one_or_none()
+    if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
-    query = (
-        select(Node)
-        .options(selectinload(Node.tags))
-        .where(Node.group_id == group_id)
-    )
+    if include_descendants:
+        # Get all descendant group IDs using materialized path
+        descendants_result = await db.execute(
+            select(DeviceGroup.id).where(
+                DeviceGroup.path.startswith(group.path + "/")
+            )
+        )
+        descendant_ids = [g for g in descendants_result.scalars().all()]
+        all_group_ids = [group_id] + descendant_ids
+
+        query = (
+            select(Node)
+            .options(selectinload(Node.tags))
+            .where(Node.group_id.in_(all_group_ids))
+        )
+    else:
+        query = (
+            select(Node)
+            .options(selectinload(Node.tags))
+            .where(Node.group_id == group_id)
+        )
+
     result = await db.execute(query)
     nodes = result.scalars().all()
 

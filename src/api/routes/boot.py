@@ -650,18 +650,30 @@ async def get_boot_status(
         # Workflow assigned - chain to main boot endpoint
         return f"""#!ipxe
 # Workflow assigned - proceeding to install
+:start
 echo [{short_id}] Workflow assigned: {node.workflow_id}
 echo Starting installation...
-chain {server}/api/v1/boot?mac={mac}
+chain {server}/api/v1/boot?mac={mac} || goto retry
+
+:retry
+echo [{short_id}] Failed to load boot script, retrying in 5s...
+sleep 5
+goto start
 """
 
     # Still waiting - sleep and re-poll
     return f"""#!ipxe
 # Still waiting for workflow assignment
+:poll
 echo [{short_id}] Waiting for workflow...
 echo Press ESC to skip and boot from local disk.
 prompt --key 0x1b --timeout 10000 && goto skip ||
-chain {server}/api/v1/boot/status?mac={mac}
+chain {server}/api/v1/boot/status?mac={mac} || goto retry
+
+:retry
+echo [{short_id}] Server unreachable, retrying in 5s...
+sleep 5
+goto poll
 
 :skip
 echo Skipping - booting from local disk...
