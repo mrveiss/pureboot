@@ -245,11 +245,14 @@ fetch_session_info() {
         return 1
     fi
 
-    # Parse session info
-    SESSION_STATUS=$(echo "${response}" | jq -r '.status // empty' 2>/dev/null)
-    RESIZE_MODE=$(echo "${response}" | jq -r '.resize_mode // "none"' 2>/dev/null)
-    COMPRESSION_ENABLED=$(echo "${response}" | jq -r '.compression_enabled // true' 2>/dev/null)
-    IMAGE_FILENAME=$(echo "${response}" | jq -r '.image_filename // "disk.raw.gz"' 2>/dev/null)
+    # Parse session info - extract from .data wrapper
+    local session_data
+    session_data=$(echo "${response}" | jq -r '.data // .' 2>/dev/null)
+
+    SESSION_STATUS=$(echo "${session_data}" | jq -r '.status // empty' 2>/dev/null)
+    RESIZE_MODE=$(echo "${session_data}" | jq -r '.resize_mode // "none"' 2>/dev/null)
+    COMPRESSION_ENABLED=$(echo "${session_data}" | jq -r '.compression_enabled // true' 2>/dev/null)
+    IMAGE_FILENAME=$(echo "${session_data}" | jq -r '.image_filename // "disk.raw.gz"' 2>/dev/null)
 
     # Validate session status
     if [[ -z "${SESSION_STATUS}" ]]; then

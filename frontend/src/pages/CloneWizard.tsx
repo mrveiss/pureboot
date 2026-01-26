@@ -128,8 +128,9 @@ export function CloneWizard() {
     if (!sourceNodeId) return false
     if (isSameNode) return false
     if (cloneMode === 'staged' && !stagingBackendId) return false
+    if (cloneMode === 'direct' && !targetNodeId) return false
     return true
-  }, [sourceNodeId, isSameNode, cloneMode, stagingBackendId])
+  }, [sourceNodeId, targetNodeId, isSameNode, cloneMode, stagingBackendId])
 
   // Handle form submission
   const handleSubmit = async () => {

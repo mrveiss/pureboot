@@ -886,3 +886,208 @@ async def update_resize_plan(
         data=plan,
         message="Resize plan updated successfully",
     )
+
+
+# Alias for /plan endpoint (scripts use /resize-plan)
+@router.get(
+    "/clone-sessions/{session_id}/resize-plan",
+    response_model=ApiResponse[ResizePlan | None],
+)
+async def get_resize_plan_alias(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Alias for get_resize_plan - scripts use /resize-plan path."""
+    return await get_resize_plan(session_id, db)
+
+
+# ============== Staging Endpoints ==============
+
+
+class StagingStatusUpdate(BaseModel):
+    """Request body for updating staging status."""
+
+    status: str  # uploading, ready, downloading, cleanup, deleted
+    size_bytes: int | None = None  # Final size of staged image
+
+
+class SourceCompleteRequest(BaseModel):
+    """Request body when source completes upload."""
+
+    size_bytes: int
+    duration_seconds: float | None = None
+    compression_ratio: float | None = None
+
+
+@router.get(
+    "/clone-sessions/{session_id}/staging-info",
+    response_model=ApiResponse[dict],
+)
+async def get_staging_info(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get staging mount information for source/target scripts.
+
+    Returns connection details for NFS or iSCSI based on the configured
+    storage backend.
+    """
+    result = await db.execute(
+        select(CloneSession)
+        .options(selectinload(CloneSession.staging_backend))
+        .where(CloneSession.id == session_id)
+    )
+    session = result.scalar_one_or_none()
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Clone session not found")
+
+    if not session.staging_backend_id:
+        raise HTTPException(
+            status_code=400,
+            detail="No storage backend configured for this session",
+        )
+
+    if not session.staging_backend:
+        raise HTTPException(
+            status_code=404,
+            detail="Storage backend not found",
+        )
+
+    backend = session.staging_backend
+    config = json.loads(backend.config_json)
+
+    # Build staging info based on backend type
+    if backend.type == "nfs":
+        staging_info = {
+            "type": "nfs",
+            "server": config.get("server"),
+            "export": config.get("export_path", config.get("export")),
+            "path": f"clone-{session.id}",
+            "options": config.get("mount_options", "rw,sync,noatime"),
+            "image_filename": "disk.raw.gz",
+        }
+    elif backend.type == "iscsi":
+        staging_info = {
+            "type": "iscsi",
+            "target": config.get("target"),
+            "portal": f"{config.get('host', config.get('portal'))}:{config.get('port', 3260)}",
+            "username": config.get("username") if config.get("chap_enabled") else None,
+            "password": config.get("password") if config.get("chap_enabled") else None,
+            "lun": 0,
+        }
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported storage backend type for staging: {backend.type}",
+        )
+
+    return ApiResponse(
+        data=staging_info,
+        message="Staging info retrieved",
+    )
+
+
+@router.post(
+    "/clone-sessions/{session_id}/staging-status",
+    response_model=ApiResponse[dict],
+)
+async def update_staging_status(
+    session_id: str,
+    request: StagingStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Update staging status from source/target scripts.
+
+    Valid statuses: uploading, ready, downloading, cleanup, deleted
+    """
+    result = await db.execute(
+        select(CloneSession).where(CloneSession.id == session_id)
+    )
+    session = result.scalar_one_or_none()
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Clone session not found")
+
+    valid_statuses = {"uploading", "ready", "downloading", "cleanup", "deleted"}
+    if request.status not in valid_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid staging status. Must be one of: {', '.join(sorted(valid_statuses))}",
+        )
+
+    session.staging_status = request.status
+    if request.size_bytes is not None:
+        session.staging_size_bytes = request.size_bytes
+
+    await db.flush()
+
+    # Broadcast status change
+    await global_ws_manager.broadcast(
+        f"clone.staging_{request.status}",
+        {
+            "session_id": session_id,
+            "staging_status": request.status,
+            "staging_size_bytes": session.staging_size_bytes,
+        },
+    )
+
+    return ApiResponse(
+        data={
+            "session_id": session_id,
+            "staging_status": request.status,
+        },
+        message=f"Staging status updated to {request.status}",
+    )
+
+
+@router.post(
+    "/clone-sessions/{session_id}/source-complete",
+    response_model=ApiResponse[dict],
+)
+async def source_complete(
+    session_id: str,
+    request: SourceCompleteRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Called when source finishes uploading to staging.
+
+    Marks staging as ready for target to begin download.
+    """
+    result = await db.execute(
+        select(CloneSession).where(CloneSession.id == session_id)
+    )
+    session = result.scalar_one_or_none()
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Clone session not found")
+
+    # Update session
+    session.staging_status = "ready"
+    session.staging_size_bytes = request.size_bytes
+
+    await db.flush()
+
+    # Broadcast source complete event
+    await global_ws_manager.broadcast(
+        "clone.source_upload_complete",
+        {
+            "session_id": session_id,
+            "staging_status": "ready",
+            "size_bytes": request.size_bytes,
+            "duration_seconds": request.duration_seconds,
+            "compression_ratio": request.compression_ratio,
+        },
+    )
+
+    return ApiResponse(
+        data={
+            "session_id": session_id,
+            "staging_status": "ready",
+            "size_bytes": request.size_bytes,
+        },
+        message="Source upload complete, staging ready for target",
+    )
