@@ -23,9 +23,16 @@ class DeviceGroup(Base):
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     description: Mapped[str | None] = mapped_column(String(500))
 
-    # Default settings for nodes in this group
+    # Hierarchy
+    parent_id: Mapped[str | None] = mapped_column(
+        ForeignKey("device_groups.id", ondelete="RESTRICT"), nullable=True
+    )
+    path: Mapped[str] = mapped_column(String(1000), index=True, default="/")
+    depth: Mapped[int] = mapped_column(default=0)
+
+    # Default settings for nodes in this group (nullable for inheritance)
     default_workflow_id: Mapped[str | None] = mapped_column(String(36))
-    auto_provision: Mapped[bool] = mapped_column(default=False)
+    auto_provision: Mapped[bool | None] = mapped_column(default=None)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(default=func.now())
@@ -34,6 +41,15 @@ class DeviceGroup(Base):
     )
 
     # Relationships
+    parent: Mapped["DeviceGroup | None"] = relationship(
+        "DeviceGroup",
+        back_populates="children",
+        remote_side="DeviceGroup.id",
+    )
+    children: Mapped[list["DeviceGroup"]] = relationship(
+        "DeviceGroup",
+        back_populates="parent",
+    )
     nodes: Mapped[list["Node"]] = relationship(back_populates="group")
     user_groups: Mapped[list["UserGroup"]] = relationship(
         secondary="user_group_device_groups", back_populates="device_groups"

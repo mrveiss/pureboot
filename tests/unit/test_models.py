@@ -75,7 +75,7 @@ class TestDeviceGroupModel:
 
         assert group.id is not None
         assert group.name == "webservers"
-        assert group.auto_provision is False
+        assert group.auto_provision is None  # Default is None for inheritance
 
     def test_group_name_unique(self, session):
         """Group name must be unique."""
@@ -145,3 +145,38 @@ class TestNodeTagModel:
         session.commit()
 
         assert session.get(NodeTag, tag_id) is None
+
+
+class TestDeviceGroupHierarchy:
+    """Test DeviceGroup hierarchy features."""
+
+    def test_group_with_parent(self, session):
+        """Group can have a parent."""
+        parent = DeviceGroup(name="servers")
+        session.add(parent)
+        session.flush()
+
+        child = DeviceGroup(name="webservers", parent_id=parent.id)
+        session.add(child)
+        session.commit()
+
+        assert child.parent_id == parent.id
+        assert child.parent.name == "servers"
+        assert child in parent.children
+
+    def test_group_path_and_depth(self, session):
+        """Group has path and depth fields."""
+        group = DeviceGroup(name="servers", path="/servers", depth=0)
+        session.add(group)
+        session.commit()
+
+        assert group.path == "/servers"
+        assert group.depth == 0
+
+    def test_auto_provision_nullable(self, session):
+        """auto_provision can be None for inheritance."""
+        group = DeviceGroup(name="servers", auto_provision=None)
+        session.add(group)
+        session.commit()
+
+        assert group.auto_provision is None
