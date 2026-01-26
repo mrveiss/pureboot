@@ -13,6 +13,7 @@ from src.db.models import (
     Workflow,
     WorkflowStep,
     WorkflowExecution,
+    StepResult,
 )
 
 
@@ -677,3 +678,63 @@ class TestWorkflowExecution:
         session.flush()
 
         assert session.get(WorkflowExecution, execution_id) is None
+
+
+class TestStepResult:
+    """Test StepResult model."""
+
+    def test_step_result_creation(self, session):
+        """StepResult can be created."""
+        node = Node(mac_address="aa:bb:cc:dd:ee:ff")
+        workflow = Workflow(name="test-workflow", os_family="linux")
+        session.add_all([node, workflow])
+        session.flush()
+
+        step = WorkflowStep(workflow_id=workflow.id, sequence=1, name="Boot", type="boot")
+        session.add(step)
+        session.flush()
+
+        execution = WorkflowExecution(node_id=node.id, workflow_id=workflow.id)
+        session.add(execution)
+        session.flush()
+
+        result = StepResult(
+            execution_id=execution.id,
+            step_id=step.id,
+            attempt=1,
+            status="running",
+        )
+        session.add(result)
+        session.flush()
+
+        assert result.id is not None
+        assert result.attempt == 1
+        assert result.status == "running"
+
+    def test_step_result_with_details(self, session):
+        """StepResult stores exit code and logs."""
+        node = Node(mac_address="aa:bb:cc:dd:ee:ff")
+        workflow = Workflow(name="test-workflow", os_family="linux")
+        session.add_all([node, workflow])
+        session.flush()
+
+        step = WorkflowStep(workflow_id=workflow.id, sequence=1, name="Script", type="script")
+        execution = WorkflowExecution(node_id=node.id, workflow_id=workflow.id)
+        session.add_all([step, execution])
+        session.flush()
+
+        result = StepResult(
+            execution_id=execution.id,
+            step_id=step.id,
+            attempt=1,
+            status="failed",
+            exit_code=1,
+            message="Script failed",
+            logs="Error: command not found",
+        )
+        session.add(result)
+        session.flush()
+
+        assert result.exit_code == 1
+        assert result.message == "Script failed"
+        assert "command not found" in result.logs

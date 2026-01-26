@@ -561,15 +561,15 @@ class WorkflowExecution(Base):
     node: Mapped["Node"] = relationship()
     workflow: Mapped["Workflow"] = relationship()
     current_step: Mapped["WorkflowStep | None"] = relationship()
-    step_results: Mapped[list["WorkflowStepResult"]] = relationship(
+    step_results: Mapped[list["StepResult"]] = relationship(
         back_populates="execution", cascade="all, delete-orphan"
     )
 
 
-class WorkflowStepResult(Base):
+class StepResult(Base):
     """Result of executing a workflow step."""
 
-    __tablename__ = "workflow_step_results"
+    __tablename__ = "step_results"
 
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -580,25 +580,15 @@ class WorkflowStepResult(Base):
         index=True,
     )
     step_id: Mapped[str] = mapped_column(
-        ForeignKey("workflow_steps.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("workflow_steps.id", ondelete="CASCADE"), nullable=False
     )
-
-    # Status: pending, running, completed, failed, skipped
-    status: Mapped[str] = mapped_column(
-        String(50), default="pending", nullable=False, index=True
-    )
-
-    # Timing
-    started_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    attempt: Mapped[int] = mapped_column(default=1)
+    status: Mapped[str] = mapped_column(String(50), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
-
-    # Result tracking
-    output: Mapped[str | None] = mapped_column(Text, nullable=True)
-    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    retry_count: Mapped[int] = mapped_column(default=0)
-
-    # Timestamps
-    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    exit_code: Mapped[int | None] = mapped_column(nullable=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    logs: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
     execution: Mapped["WorkflowExecution"] = relationship(back_populates="step_results")
