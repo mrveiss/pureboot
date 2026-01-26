@@ -54,7 +54,7 @@ class NodeCreate(BaseModel):
     boot_mode: str = Field(
         "bios",
         description="Boot mode",
-        examples=["bios", "uefi"],
+        examples=["bios", "uefi", "pi"],
     )
     group_id: str | None = Field(None, description="Device group ID to assign")
     vendor: str | None = Field(None, description="Hardware vendor", examples=["Dell", "HP", "Lenovo"])
@@ -83,7 +83,7 @@ class NodeCreate(BaseModel):
     @classmethod
     def validate_boot_mode(cls, v: str) -> str:
         """Validate boot mode."""
-        valid = {"bios", "uefi"}
+        valid = {"bios", "uefi", "pi"}
         if v not in valid:
             raise ValueError(f"Invalid boot mode: {v}. Must be one of {valid}")
         return v
