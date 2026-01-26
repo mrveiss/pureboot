@@ -54,13 +54,18 @@ class NodeCreate(BaseModel):
     boot_mode: str = Field(
         "bios",
         description="Boot mode",
-        examples=["bios", "uefi"],
+        examples=["bios", "uefi", "pi"],
     )
     group_id: str | None = Field(None, description="Device group ID to assign")
     vendor: str | None = Field(None, description="Hardware vendor", examples=["Dell", "HP", "Lenovo"])
     model: str | None = Field(None, description="Hardware model", examples=["PowerEdge R640", "ProLiant DL380"])
     serial_number: str | None = Field(None, description="Serial number")
     system_uuid: str | None = Field(None, description="System UUID from SMBIOS")
+    pi_model: str | None = Field(
+        None,
+        description="Raspberry Pi model",
+        examples=["pi3b+", "pi4", "pi5", "cm4"],
+    )
 
     @field_validator("mac_address")
     @classmethod
@@ -83,7 +88,7 @@ class NodeCreate(BaseModel):
     @classmethod
     def validate_boot_mode(cls, v: str) -> str:
         """Validate boot mode."""
-        valid = {"bios", "uefi"}
+        valid = {"bios", "uefi", "pi"}
         if v not in valid:
             raise ValueError(f"Invalid boot mode: {v}. Must be one of {valid}")
         return v
@@ -99,6 +104,7 @@ class NodeUpdate(BaseModel):
     model: str | None = None
     serial_number: str | None = None
     system_uuid: str | None = None
+    pi_model: str | None = None
 
 
 class StateTransition(BaseModel):
@@ -174,6 +180,7 @@ class NodeResponse(BaseModel):
     system_uuid: str | None
     arch: str
     boot_mode: str
+    pi_model: str | None = None
     group_id: str | None
     tags: list[str] = []
     install_attempts: int = 0
@@ -199,6 +206,7 @@ class NodeResponse(BaseModel):
             system_uuid=node.system_uuid,
             arch=node.arch,
             boot_mode=node.boot_mode,
+            pi_model=getattr(node, 'pi_model', None),  # Handle nodes without pi_model
             group_id=node.group_id,
             tags=[t.tag for t in node.tags],
             install_attempts=node.install_attempts,

@@ -65,6 +65,17 @@ class CASettings(BaseSettings):
     key_size: int = 256  # 256 for ECDSA (P-256), 2048/4096 for RSA
 
 
+class PiSettings(BaseSettings):
+    """Raspberry Pi boot settings."""
+    enabled: bool = True
+    firmware_dir: Path = Path("./tftp/rpi-firmware")
+    deploy_dir: Path = Path("./tftp/deploy-arm64")
+    deploy_kernel: str = "kernel8.img"
+    deploy_initrd: str = "initramfs.img"
+    # Directory for per-node TFTP files (will contain serial number subdirs)
+    nodes_dir: Path = Path("./tftp/pi-nodes")
+
+
 class Settings(BaseSettings):
     """Main application settings."""
     model_config = SettingsConfigDict(
@@ -89,6 +100,7 @@ class Settings(BaseSettings):
     registration: RegistrationSettings = Field(default_factory=RegistrationSettings)
     audit: AuditSettings = Field(default_factory=AuditSettings)
     ca: CASettings = Field(default_factory=CASettings)
+    pi: PiSettings = Field(default_factory=PiSettings)
 
     # Installation timeout in minutes (0 = disabled)
     install_timeout_minutes: int = 60

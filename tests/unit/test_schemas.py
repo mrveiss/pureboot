@@ -56,6 +56,25 @@ class TestNodeCreate:
         assert node.vendor == "Dell Inc."
         assert node.model == "PowerEdge R740"
 
+    def test_pi_boot_mode_accepted(self):
+        """Pi boot mode is accepted."""
+        node = NodeCreate(
+            mac_address="dc:a6:32:12:34:56",
+            arch="aarch64",
+            boot_mode="pi",
+        )
+        assert node.boot_mode == "pi"
+
+    def test_pi_node_with_serial(self):
+        """Pi node with serial number for identification."""
+        node = NodeCreate(
+            mac_address="dc:a6:32:12:34:56",
+            arch="aarch64",
+            boot_mode="pi",
+            serial_number="d83add36",
+        )
+        assert node.serial_number == "d83add36"
+
 
 class TestStateTransition:
     """Test StateTransition schema."""
@@ -129,3 +148,31 @@ class TestNodeReport:
         """MAC address normalized."""
         report = NodeReport(mac_address="00-11-22-AA-BB-CC")
         assert report.mac_address == "00:11:22:aa:bb:cc"
+
+
+class TestPiNodeSchemas:
+    """Test Pi-specific node schema fields."""
+
+    def test_node_create_with_pi_model(self):
+        """NodeCreate accepts pi_model field."""
+        node = NodeCreate(
+            mac_address="dc:a6:32:12:34:56",
+            arch="aarch64",
+            boot_mode="pi",
+            serial_number="d83add36",
+            pi_model="pi4",
+        )
+        assert node.pi_model == "pi4"
+
+    def test_pi_model_validation(self):
+        """pi_model must be valid Pi model identifier."""
+        node = NodeCreate(
+            mac_address="dc:a6:32:12:34:56",
+            pi_model="pi4",
+        )
+        assert node.pi_model == "pi4"
+
+    def test_pi_model_optional(self):
+        """pi_model is optional."""
+        node = NodeCreate(mac_address="dc:a6:32:12:34:56")
+        assert node.pi_model is None
