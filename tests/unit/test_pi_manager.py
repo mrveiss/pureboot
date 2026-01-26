@@ -6,6 +6,12 @@ import tempfile
 import shutil
 
 
+def test_pi_manager_importable_from_pxe():
+    """PiManager is importable from src.pxe module."""
+    from src.pxe import PiManager
+    assert PiManager is not None
+
+
 class TestPiManager:
     """Test PiManager class."""
 
