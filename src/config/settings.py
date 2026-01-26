@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     boot_menu: BootMenuSettings = Field(default_factory=BootMenuSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     registration: RegistrationSettings = Field(default_factory=RegistrationSettings)
-audit: AuditSettings = Field(default_factory=AuditSettings)
+    audit: AuditSettings = Field(default_factory=AuditSettings)
     ca: CASettings = Field(default_factory=CASettings)
 
     # Installation timeout in minutes (0 = disabled)

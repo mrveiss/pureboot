@@ -13,7 +13,7 @@ import {
   Activity,
   Settings,
   Users,
-UsersRound,
+  UsersRound,
   Bot,
   Shield,
   Scale,

@@ -115,7 +115,7 @@ async def lifespan(app: FastAPI):
     await _register_scheduled_jobs()
     logger.info("Scheduler started")
 
-# Schedule escalation check job for expired approvals
+    # Schedule escalation check job for expired approvals
     sync_scheduler.scheduler.add_job(
         process_escalations,
         'interval',
@@ -297,7 +297,7 @@ app = FastAPI(
             "description": "WebSocket endpoint for real-time updates",
         },
         {
-"name": "approval-rules",
+            "name": "approval-rules",
             "description": "Approval rules for configuring approval policies",
         },
         {
