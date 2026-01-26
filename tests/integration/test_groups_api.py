@@ -185,3 +185,44 @@ class TestGroupHierarchy:
 
         assert data["path"] == "/servers/web/prod"
         assert data["depth"] == 2
+
+    def test_get_group_shows_children_count(self, client: TestClient):
+        """Get group shows children count."""
+        parent_resp = client.post("/api/v1/groups", json={"name": "servers"})
+        parent_id = parent_resp.json()["data"]["id"]
+
+        client.post("/api/v1/groups", json={"name": "web", "parent_id": parent_id})
+        client.post("/api/v1/groups", json={"name": "db", "parent_id": parent_id})
+
+        response = client.get(f"/api/v1/groups/{parent_id}")
+        assert response.json()["data"]["children_count"] == 2
+
+    def test_list_groups_filter_root_only(self, client: TestClient):
+        """List only root groups."""
+        parent_resp = client.post("/api/v1/groups", json={"name": "servers"})
+        parent_id = parent_resp.json()["data"]["id"]
+        client.post("/api/v1/groups", json={"name": "web", "parent_id": parent_id})
+        client.post("/api/v1/groups", json={"name": "other"})
+
+        response = client.get("/api/v1/groups?root_only=true")
+        data = response.json()
+        assert data["total"] == 2
+        names = [g["name"] for g in data["data"]]
+        assert "servers" in names
+        assert "other" in names
+        assert "web" not in names
+
+    def test_list_groups_filter_by_parent(self, client: TestClient):
+        """List children of a specific parent."""
+        parent_resp = client.post("/api/v1/groups", json={"name": "servers"})
+        parent_id = parent_resp.json()["data"]["id"]
+        client.post("/api/v1/groups", json={"name": "web", "parent_id": parent_id})
+        client.post("/api/v1/groups", json={"name": "db", "parent_id": parent_id})
+        client.post("/api/v1/groups", json={"name": "other"})
+
+        response = client.get(f"/api/v1/groups?parent_id={parent_id}")
+        data = response.json()
+        assert data["total"] == 2
+        names = [g["name"] for g in data["data"]]
+        assert "web" in names
+        assert "db" in names

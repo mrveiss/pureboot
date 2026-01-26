@@ -20,24 +20,46 @@ router = APIRouter()
 
 @router.get("/groups", response_model=ApiListResponse[DeviceGroupResponse])
 async def list_groups(
+    root_only: bool = Query(False, description="Only return root groups"),
+    parent_id: str | None = Query(None, description="Filter by parent ID"),
     db: AsyncSession = Depends(get_db),
 ):
     """List all device groups."""
     query = select(DeviceGroup)
+
+    if root_only:
+        query = query.where(DeviceGroup.parent_id.is_(None))
+    elif parent_id:
+        query = query.where(DeviceGroup.parent_id == parent_id)
+
     result = await db.execute(query)
     groups = result.scalars().all()
 
+    # Get node counts
     count_query = (
         select(Node.group_id, func.count(Node.id))
         .where(Node.group_id.isnot(None))
         .group_by(Node.group_id)
     )
     count_result = await db.execute(count_query)
-    counts = dict(count_result.all())
+    node_counts = dict(count_result.all())
+
+    # Get children counts
+    children_query = (
+        select(DeviceGroup.parent_id, func.count(DeviceGroup.id))
+        .where(DeviceGroup.parent_id.isnot(None))
+        .group_by(DeviceGroup.parent_id)
+    )
+    children_result = await db.execute(children_query)
+    children_counts = dict(children_result.all())
 
     return ApiListResponse(
         data=[
-            DeviceGroupResponse.from_group(g, node_count=counts.get(g.id, 0))
+            DeviceGroupResponse.from_group(
+                g,
+                node_count=node_counts.get(g.id, 0),
+                children_count=children_counts.get(g.id, 0),
+            )
             for g in groups
         ],
         total=len(groups),
@@ -110,11 +132,23 @@ async def get_group(
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
+    # Node count
     count_query = select(func.count(Node.id)).where(Node.group_id == group_id)
     count_result = await db.execute(count_query)
     node_count = count_result.scalar() or 0
 
-    return ApiResponse(data=DeviceGroupResponse.from_group(group, node_count=node_count))
+    # Children count
+    children_query = select(func.count(DeviceGroup.id)).where(
+        DeviceGroup.parent_id == group_id
+    )
+    children_result = await db.execute(children_query)
+    children_count = children_result.scalar() or 0
+
+    return ApiResponse(
+        data=DeviceGroupResponse.from_group(
+            group, node_count=node_count, children_count=children_count
+        )
+    )
 
 
 @router.patch("/groups/{group_id}", response_model=ApiResponse[DeviceGroupResponse])
