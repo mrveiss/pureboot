@@ -125,8 +125,8 @@ case "${PUREBOOT_MODE}" in
         log "  image (default)      - Deploy disk image from URL"
         log "  clone_source_direct  - P2P clone: serve disk to target"
         log "  clone_target_direct  - P2P clone: receive disk from source"
-        log "  clone_source_staged  - Staged clone: upload to server (future)"
-        log "  clone_target_staged  - Staged clone: download from server (future)"
+        log "  clone_source_staged  - Staged clone: upload disk image to server"
+        log "  clone_target_staged  - Staged clone: download disk image from server"
         log "  partition            - Partition management (future)"
         exit 1
         ;;
@@ -319,9 +319,13 @@ echo "Copying clone scripts..."
 cp "${SCRIPT_DIR}/scripts/pureboot-common.sh" "${ROOTFS_DIR}/usr/local/bin/"
 cp "${SCRIPT_DIR}/scripts/pureboot-clone-source-direct.sh" "${ROOTFS_DIR}/usr/local/bin/"
 cp "${SCRIPT_DIR}/scripts/pureboot-clone-target-direct.sh" "${ROOTFS_DIR}/usr/local/bin/"
+cp "${SCRIPT_DIR}/scripts/pureboot-clone-source-staged.sh" "${ROOTFS_DIR}/usr/local/bin/"
+cp "${SCRIPT_DIR}/scripts/pureboot-clone-target-staged.sh" "${ROOTFS_DIR}/usr/local/bin/"
 chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-common.sh"
 chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-clone-source-direct.sh"
 chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-clone-target-direct.sh"
+chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-clone-source-staged.sh"
+chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-clone-target-staged.sh"
 
 # Copy partition scripts
 echo "Copying partition scripts..."
