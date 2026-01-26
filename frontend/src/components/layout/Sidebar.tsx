@@ -13,12 +13,13 @@ import {
   Activity,
   Settings,
   Users,
-  UsersRound,
+UsersRound,
   Bot,
   Shield,
   Scale,
   FileText,
   ServerCog,
+  Copy,
 } from 'lucide-react'
 
 interface NavItemProps {
@@ -72,6 +73,7 @@ export function Sidebar({ pendingApprovals = 0 }: SidebarProps) {
         <NavItem to="/templates" icon={<FileCode className="h-4 w-4" />} label="Templates" />
         <NavItem to="/hypervisors" icon={<Cloud className="h-4 w-4" />} label="Hypervisors" />
         <NavItem to="/storage" icon={<HardDrive className="h-4 w-4" />} label="Storage" />
+        <NavItem to="/clone" icon={<Copy className="h-4 w-4" />} label="Clone Sessions" />
 
         <Separator className="my-4" />
 

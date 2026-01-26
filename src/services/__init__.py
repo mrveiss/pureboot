@@ -1,6 +1,7 @@
 """Service layer modules for PureBoot business logic."""
 from src.services.audit import AuditService, audit_action, audit_service
 from src.services.ldap import LdapService, LdapUser, ldap_service
+from src.services.staging import StagingService, staging_service
 
 __all__ = [
     "AuditService",
@@ -9,4 +10,6 @@ __all__ = [
     "LdapService",
     "LdapUser",
     "ldap_service",
+    "StagingService",
+    "staging_service",
 ]

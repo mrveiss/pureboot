@@ -24,7 +24,10 @@ from src.api.routes.roles import router as roles_router
 from src.api.routes.approval_rules import router as approval_rules_router
 from src.api.routes.audit import router as audit_router
 from src.api.routes.ldap import router as ldap_router
+from src.api.routes.clone import router as clone_router
+from src.api.routes.disks import router as disks_router
 from src.api.middleware.auth import AuthMiddleware
+from src.core.ca import ca_service
 from src.db.database import init_db, close_db, async_session_factory
 from src.config import settings
 from src.pxe.tftp_server import TFTPServer
@@ -112,7 +115,7 @@ async def lifespan(app: FastAPI):
     await _register_scheduled_jobs()
     logger.info("Scheduler started")
 
-    # Schedule escalation check job for expired approvals
+# Schedule escalation check job for expired approvals
     sync_scheduler.scheduler.add_job(
         process_escalations,
         'interval',
@@ -121,6 +124,10 @@ async def lifespan(app: FastAPI):
         replace_existing=True
     )
     logger.info("Escalation check job scheduled (every 5 minutes)")
+
+    # Initialize CA service
+    ca_service.initialize()
+    logger.info("CA service initialized")
 
     logger.info(f"PureBoot ready on http://{settings.host}:{settings.port}")
 
@@ -290,7 +297,7 @@ app = FastAPI(
             "description": "WebSocket endpoint for real-time updates",
         },
         {
-            "name": "approval-rules",
+"name": "approval-rules",
             "description": "Approval rules for configuring approval policies",
         },
         {
@@ -300,6 +307,14 @@ app = FastAPI(
         {
             "name": "ldap",
             "description": "LDAP/AD configuration management",
+        },
+        {
+            "name": "clone-sessions",
+            "description": "Disk cloning session management - create and monitor clone operations",
+        },
+        {
+            "name": "disks",
+            "description": "Disk and partition information - scan and retrieve disk layouts from nodes",
         },
     ],
 )
@@ -331,6 +346,8 @@ app.include_router(roles_router, prefix="/api/v1", tags=["roles"])
 app.include_router(approval_rules_router, prefix="/api/v1", tags=["approval-rules"])
 app.include_router(audit_router, prefix="/api/v1", tags=["audit"])
 app.include_router(ldap_router, prefix="/api/v1", tags=["ldap"])
+app.include_router(clone_router, prefix="/api/v1", tags=["clone-sessions"])
+app.include_router(disks_router, prefix="/api/v1", tags=["disks"])
 
 # Static assets directory
 assets_dir = Path("assets")

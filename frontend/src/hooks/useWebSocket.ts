@@ -8,6 +8,12 @@ export type WebSocketEvent =
   | { type: 'install.progress'; data: { node_id: string; progress: number } }
   | { type: 'approval.requested'; data: { id: string; action_type: string } }
   | { type: 'approval.resolved'; data: { id: string; status: 'approved' | 'rejected' } }
+  | { type: 'clone.started'; data: { session_id: string; source_node_id: string; target_node_id: string } }
+  | { type: 'clone.source_ready'; data: { session_id: string; source_ip: string; source_port: number; size_bytes: number } }
+  | { type: 'clone.progress'; data: { session_id: string; bytes_transferred: number; bytes_total: number; progress_percent: number; transfer_rate_bps: number | null; status: string | null } }
+  | { type: 'clone.completed'; data: { session_id: string; duration_seconds: number } }
+  | { type: 'clone.failed'; data: { session_id: string; error: string } }
+  | { type: 'clone.cancelled'; data: { session_id: string } }
   | { type: 'pong' }
 
 type EventHandler = (event: WebSocketEvent) => void

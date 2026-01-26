@@ -1,0 +1,17 @@
+# Direct Clone Source Workflow
+# Boots into deploy environment to serve disk via HTTPS
+id: clone-source-direct
+name: Clone Source (Direct P2P)
+description: Boot into deploy environment to serve disk for peer-to-peer cloning
+
+# Install method: deploy - boots minimal environment for cloning
+install_method: deploy
+
+# Boot into clone source mode
+boot_params:
+  pureboot.mode: clone_source_direct
+  # session_id and device are set dynamically by controller
+
+# Architecture and boot mode
+architecture: x86_64
+boot_mode: uefi

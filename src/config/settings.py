@@ -55,6 +55,16 @@ class AuditSettings(BaseSettings):
     siem_webhook_url: str | None = None
 
 
+class CASettings(BaseSettings):
+    """Certificate Authority settings for clone session TLS."""
+    enabled: bool = True
+    cert_dir: Path = Path("/opt/pureboot/certs")
+    ca_validity_years: int = 10
+    session_cert_validity_hours: int = 24
+    key_algorithm: str = "ECDSA"  # ECDSA or RSA
+    key_size: int = 256  # 256 for ECDSA (P-256), 2048/4096 for RSA
+
+
 class Settings(BaseSettings):
     """Main application settings."""
     model_config = SettingsConfigDict(
@@ -77,7 +87,8 @@ class Settings(BaseSettings):
     boot_menu: BootMenuSettings = Field(default_factory=BootMenuSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     registration: RegistrationSettings = Field(default_factory=RegistrationSettings)
-    audit: AuditSettings = Field(default_factory=AuditSettings)
+audit: AuditSettings = Field(default_factory=AuditSettings)
+    ca: CASettings = Field(default_factory=CASettings)
 
     # Installation timeout in minutes (0 = disabled)
     install_timeout_minutes: int = 60

@@ -1,7 +1,7 @@
 import { createBrowserRouter } from 'react-router-dom'
 import { AppShell } from '@/components/layout'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
-import { Dashboard, Nodes, NodeDetail, Groups, GroupDetail, Workflows, Templates, Hypervisors, ActivityLog, Approvals, Users, Storage, Settings, Login, NotFound, UserGroups, ServiceAccounts, Roles, ApprovalRules, AuditLogs, LdapConfig } from '@/pages'
+import { Dashboard, Nodes, NodeDetail, Groups, GroupDetail, Workflows, Templates, Hypervisors, ActivityLog, Approvals, Users, Storage, CloneSessions, CloneDetail, CloneWizard, PartitionTool, Settings, Login, NotFound, UserGroups, ServiceAccounts, Roles, ApprovalRules, AuditLogs, LdapConfig } from '@/pages'
 
 export const router = createBrowserRouter([
   {
@@ -19,12 +19,16 @@ export const router = createBrowserRouter([
       { index: true, element: <Dashboard /> },
       { path: 'nodes', element: <Nodes /> },
       { path: 'nodes/:nodeId', element: <NodeDetail /> },
+      { path: 'nodes/:nodeId/partitions', element: <PartitionTool /> },
       { path: 'groups', element: <Groups /> },
       { path: 'groups/:groupId', element: <GroupDetail /> },
       { path: 'workflows', element: <Workflows /> },
       { path: 'templates', element: <Templates /> },
       { path: 'hypervisors', element: <Hypervisors /> },
       { path: 'storage', element: <Storage /> },
+      { path: 'clone', element: <CloneSessions /> },
+      { path: 'clone/new', element: <CloneWizard /> },
+      { path: 'clone/:id', element: <CloneDetail /> },
       { path: 'approvals', element: <Approvals /> },
       { path: 'activity', element: <ActivityLog /> },
       { path: 'settings', element: <Settings /> },

@@ -55,10 +55,17 @@ apk add --no-cache \
     e2fsprogs-extra \
     dosfstools \
     ntfs-3g \
+    ntfs-3g-progs \
     util-linux \
     coreutils \
     bash \
-    jq
+    jq \
+    openssl \
+    lighttpd \
+    lighttpd-mod_auth \
+    btrfs-progs \
+    xfsprogs \
+    bc
 INSTALL_EOF
 chmod +x "${ROOTFS_DIR}/install-packages.sh"
 
@@ -71,64 +78,78 @@ else
 fi
 rm -f "${ROOTFS_DIR}/install-packages.sh"
 
-# Add PureBoot deploy script
+# Add PureBoot deploy mode dispatcher
 mkdir -p "${ROOTFS_DIR}/usr/local/bin"
 cat > "${ROOTFS_DIR}/usr/local/bin/pureboot-deploy" << 'DEPLOY_EOF'
+#!/bin/bash
+# PureBoot Deploy Mode Dispatcher
+# Routes to appropriate script based on pureboot.mode kernel parameter
+
+set -e
+
+# Source common functions (initializes environment and parses cmdline)
+source /usr/local/bin/pureboot-common.sh
+
+log "=== PureBoot Deploy Mode Dispatcher ==="
+log "Mode: ${PUREBOOT_MODE:-image (default)}"
+
+# Dispatch based on mode
+case "${PUREBOOT_MODE}" in
+    clone_source_direct)
+        log "Dispatching to clone source (direct P2P)..."
+        exec /usr/local/bin/pureboot-clone-source-direct.sh
+        ;;
+    clone_target_direct)
+        log "Dispatching to clone target (direct P2P)..."
+        exec /usr/local/bin/pureboot-clone-target-direct.sh
+        ;;
+    clone_source_staged)
+        log "Dispatching to clone source (staged)..."
+        exec /usr/local/bin/pureboot-clone-source-staged.sh
+        ;;
+    clone_target_staged)
+        log "Dispatching to clone target (staged)..."
+        exec /usr/local/bin/pureboot-clone-target-staged.sh
+        ;;
+    partition)
+        log "Dispatching to partition management..."
+        exec /usr/local/bin/pureboot-partition.sh
+        ;;
+    image|"")
+        log "Dispatching to image deployment (legacy)..."
+        exec /usr/local/bin/pureboot-image.sh
+        ;;
+    *)
+        log_error "Unknown mode: ${PUREBOOT_MODE}"
+        log "Valid modes:"
+        log "  image (default)      - Deploy disk image from URL"
+        log "  clone_source_direct  - P2P clone: serve disk to target"
+        log "  clone_target_direct  - P2P clone: receive disk from source"
+        log "  clone_source_staged  - Staged clone: upload disk image to server"
+        log "  clone_target_staged  - Staged clone: download disk image from server"
+        log "  partition            - Partition management (future)"
+        exit 1
+        ;;
+esac
+DEPLOY_EOF
+chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-deploy"
+
+# Add PureBoot legacy image deployment script
+cat > "${ROOTFS_DIR}/usr/local/bin/pureboot-image.sh" << 'IMAGE_EOF'
 #!/bin/bash
 # PureBoot Image Deployment Script
 # Reads parameters from kernel cmdline and deploys disk image
 
 set -e
 
-log() {
-    echo "[PureBoot] $*"
-}
+# Source common functions
+source /usr/local/bin/pureboot-common.sh
 
-error() {
-    log "ERROR: $*"
-    # Notify server of failure
-    if [ -n "${PUREBOOT_SERVER}" ] && [ -n "${PUREBOOT_NODE_ID}" ]; then
-        curl -sf -X POST "${PUREBOOT_SERVER}/api/v1/nodes/${PUREBOOT_NODE_ID}/install-failed" \
-            -H "Content-Type: application/json" \
-            -d "{\"error\": \"$*\"}" || true
-    fi
-    exit 1
-}
-
-# Parse kernel cmdline for pureboot.* parameters
-parse_cmdline() {
-    for param in $(cat /proc/cmdline); do
-        case "$param" in
-            pureboot.server=*)
-                PUREBOOT_SERVER="${param#pureboot.server=}"
-                ;;
-            pureboot.node_id=*)
-                PUREBOOT_NODE_ID="${param#pureboot.node_id=}"
-                ;;
-            pureboot.mac=*)
-                PUREBOOT_MAC="${param#pureboot.mac=}"
-                ;;
-            pureboot.image_url=*)
-                PUREBOOT_IMAGE_URL="${param#pureboot.image_url=}"
-                ;;
-            pureboot.target=*)
-                PUREBOOT_TARGET="${param#pureboot.target=}"
-                ;;
-            pureboot.callback=*)
-                PUREBOOT_CALLBACK="${param#pureboot.callback=}"
-                ;;
-            pureboot.post_script=*)
-                PUREBOOT_POST_SCRIPT="${param#pureboot.post_script=}"
-                ;;
-        esac
-    done
-}
-
-# Verify required parameters
+# Verify required parameters for image deployment
 verify_params() {
-    [ -z "${PUREBOOT_IMAGE_URL}" ] && error "Missing pureboot.image_url"
-    [ -z "${PUREBOOT_TARGET}" ] && error "Missing pureboot.target"
-    [ ! -b "${PUREBOOT_TARGET}" ] && error "Target device not found: ${PUREBOOT_TARGET}"
+    [ -z "${PUREBOOT_IMAGE_URL}" ] && { log_error "Missing pureboot.image_url"; exit 1; }
+    [ -z "${PUREBOOT_TARGET}" ] && { log_error "Missing pureboot.target"; exit 1; }
+    [ ! -b "${PUREBOOT_TARGET}" ] && { log_error "Target device not found: ${PUREBOOT_TARGET}"; exit 1; }
 }
 
 # Detect image format from URL or content
@@ -182,7 +203,7 @@ deploy_image() {
             curl -sfL "${PUREBOOT_IMAGE_URL}" | dd of="${PUREBOOT_TARGET}" bs=4M status=progress
             ;;
         *)
-            error "Unsupported image format: ${format}"
+            log_error "Unsupported image format: ${format}"
             ;;
     esac
 
@@ -266,7 +287,6 @@ notify_complete() {
 main() {
     log "=== PureBoot Image Deployment ==="
 
-    parse_cmdline
     verify_params
 
     log ""
@@ -291,8 +311,30 @@ main() {
 }
 
 main "$@"
-DEPLOY_EOF
-chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-deploy"
+IMAGE_EOF
+chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-image.sh"
+
+# Copy clone scripts
+echo "Copying clone scripts..."
+cp "${SCRIPT_DIR}/scripts/pureboot-common.sh" "${ROOTFS_DIR}/usr/local/bin/"
+cp "${SCRIPT_DIR}/scripts/pureboot-clone-source-direct.sh" "${ROOTFS_DIR}/usr/local/bin/"
+cp "${SCRIPT_DIR}/scripts/pureboot-clone-target-direct.sh" "${ROOTFS_DIR}/usr/local/bin/"
+cp "${SCRIPT_DIR}/scripts/pureboot-clone-source-staged.sh" "${ROOTFS_DIR}/usr/local/bin/"
+cp "${SCRIPT_DIR}/scripts/pureboot-clone-target-staged.sh" "${ROOTFS_DIR}/usr/local/bin/"
+chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-common.sh"
+chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-clone-source-direct.sh"
+chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-clone-target-direct.sh"
+chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-clone-source-staged.sh"
+chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-clone-target-staged.sh"
+
+# Copy partition scripts
+echo "Copying partition scripts..."
+cp "${SCRIPT_DIR}/scripts/pureboot-disk-scan.sh" "${ROOTFS_DIR}/usr/local/bin/"
+cp "${SCRIPT_DIR}/scripts/pureboot-partition-ops.sh" "${ROOTFS_DIR}/usr/local/bin/"
+cp "${SCRIPT_DIR}/scripts/pureboot-partition.sh" "${ROOTFS_DIR}/usr/local/bin/"
+chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-disk-scan.sh"
+chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-partition-ops.sh"
+chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-partition.sh"
 
 # Create init script
 cat > "${ROOTFS_DIR}/init" << 'INIT_EOF'

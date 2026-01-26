@@ -101,3 +101,27 @@ export {
   useHypervisorVMs,
   useHypervisorTemplates,
 } from './useHypervisors'
+export {
+  cloneSessionKeys,
+  useCloneSessions,
+  useCloneSession,
+  useCreateCloneSession,
+  useUpdateCloneSession,
+  useDeleteCloneSession,
+  useSourceReady,
+  useCloneProgress,
+  useCompleteClone,
+  useFailClone,
+} from './useCloneSessions'
+export { useCloneUpdates } from './useCloneUpdates'
+export {
+  diskKeys,
+  useNodeDisks,
+  useNodeDisk,
+  useTriggerDiskScan,
+  usePartitionOperations,
+  useQueueOperation,
+  useRemoveOperation,
+  useApplyOperations,
+} from './useDisks'
+export { usePartitionUpdates } from './usePartitionUpdates'

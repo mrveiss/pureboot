@@ -10,6 +10,8 @@ export * from './hypervisor'
 export * from './rbac'
 export * from './audit'
 export * from './ldap'
+export * from './clone'
+export * from './partition'
 
 export type {
   StorageBackendType,

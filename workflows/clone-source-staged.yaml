@@ -1,0 +1,23 @@
+# Staged Clone Source Workflow
+# Boots into deploy environment to upload disk image to storage backend
+id: clone-source-staged
+name: Clone Source (Staged)
+description: Boot into deploy environment to upload disk image to storage backend for staged cloning
+
+# Install method: deploy - boots minimal environment for cloning
+install_method: deploy
+
+# Boot into clone source staged mode
+boot_params:
+  pureboot.mode: clone_source_staged
+  # session_id, device, and storage backend config set dynamically by controller
+
+# Architecture and boot mode
+architecture: x86_64
+boot_mode: uefi
+
+# Tags for filtering and categorization
+tags:
+  - clone
+  - staged
+  - source

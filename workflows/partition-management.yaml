@@ -1,0 +1,17 @@
+# Partition Management Workflow
+# Boots into deploy environment for interactive partition management
+id: partition-management
+name: Partition Management
+description: Boot into deploy environment for interactive disk and partition management
+
+# Install method: deploy - boots minimal environment
+install_method: deploy
+
+# Boot into partition management mode
+boot_params:
+  pureboot.mode: partition
+  # node_id is set dynamically by controller
+
+# Architecture and boot mode
+architecture: x86_64
+boot_mode: uefi

@@ -907,3 +907,129 @@ class Hypervisor(Base):
     updated_at: Mapped[datetime] = mapped_column(
         default=func.now(), onupdate=func.now()
     )
+
+
+class CloneSession(Base):
+    """Clone session for disk cloning between nodes."""
+
+    __tablename__ = "clone_sessions"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), default="pending", nullable=False, index=True
+    )  # pending, source_ready, cloning, completed, failed, cancelled
+
+    clone_mode: Mapped[str] = mapped_column(
+        String(10), default="staged", nullable=False
+    )  # staged, direct
+
+    # Source and target nodes
+    source_node_id: Mapped[str] = mapped_column(
+        ForeignKey("nodes.id"), nullable=False
+    )
+    source_node: Mapped["Node"] = relationship(foreign_keys=[source_node_id])
+    target_node_id: Mapped[str | None] = mapped_column(
+        ForeignKey("nodes.id"), nullable=True
+    )
+    target_node: Mapped["Node | None"] = relationship(foreign_keys=[target_node_id])
+
+    source_device: Mapped[str] = mapped_column(String(50), default="/dev/sda")
+    target_device: Mapped[str] = mapped_column(String(50), default="/dev/sda")
+
+    # Direct mode fields
+    source_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    source_port: Mapped[int] = mapped_column(default=9999)
+    source_cert_pem: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_key_pem: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_cert_pem: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_key_pem: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Staged mode fields
+    staging_backend_id: Mapped[str | None] = mapped_column(
+        ForeignKey("storage_backends.id"), nullable=True
+    )
+    staging_backend: Mapped["StorageBackend | None"] = relationship()
+    staging_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    staging_size_bytes: Mapped[int | None] = mapped_column(nullable=True)
+    staging_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # pending, provisioned, uploading, ready, downloading, cleanup, deleted
+
+    # Resize fields
+    resize_mode: Mapped[str] = mapped_column(String(20), default="none")
+    # none, shrink_source, grow_target
+    partition_plan_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Progress tracking
+    bytes_total: Mapped[int | None] = mapped_column(nullable=True)
+    bytes_transferred: Mapped[int] = mapped_column(default=0)
+    transfer_rate_bps: Mapped[int | None] = mapped_column(nullable=True)
+
+    # Error handling
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    started_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+class DiskInfo(Base):
+    """Cached disk and partition information from nodes."""
+
+    __tablename__ = "disk_info"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    node: Mapped["Node"] = relationship()
+
+    device: Mapped[str] = mapped_column(String(50), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(nullable=False)
+    model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    serial: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    partition_table: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # gpt, mbr, unknown
+    partitions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    scanned_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    __table_args__ = (UniqueConstraint("node_id", "device", name="uq_node_device"),)
+
+
+class PartitionOperation(Base):
+    """Queued partition operation for a node."""
+
+    __tablename__ = "partition_operations"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    node: Mapped["Node"] = relationship()
+
+    session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("clone_sessions.id", ondelete="SET NULL"), nullable=True
+    )
+    session: Mapped["CloneSession | None"] = relationship()
+
+    device: Mapped[str] = mapped_column(String(50), nullable=False)
+    operation: Mapped[str] = mapped_column(String(20), nullable=False)
+    # resize, create, delete, format, move, set_flag
+    params_json: Mapped[str] = mapped_column(Text, nullable=False)
+    sequence: Mapped[int] = mapped_column(nullable=False)
+
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    # pending, running, completed, failed
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    executed_at: Mapped[datetime | None] = mapped_column(nullable=True)
