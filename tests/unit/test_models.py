@@ -63,6 +63,31 @@ class TestNodeModel:
         with pytest.raises(Exception):  # IntegrityError
             session.commit()
 
+    def test_create_pi_node(self, session):
+        """Create Raspberry Pi node with pi_model field."""
+        node = Node(
+            mac_address="dc:a6:32:12:34:56",
+            arch="aarch64",
+            boot_mode="pi",
+            serial_number="d83add36",
+            pi_model="pi4",
+        )
+        session.add(node)
+        session.commit()
+
+        assert node.arch == "aarch64"
+        assert node.boot_mode == "pi"
+        assert node.pi_model == "pi4"
+        assert node.serial_number == "d83add36"
+
+    def test_pi_model_optional(self, session):
+        """pi_model field is optional (nullable)."""
+        node = Node(mac_address="00:11:22:33:44:55")
+        session.add(node)
+        session.commit()
+
+        assert node.pi_model is None
+
 
 class TestDeviceGroupModel:
     """Test DeviceGroup model."""

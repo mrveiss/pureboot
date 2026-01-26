@@ -65,6 +65,7 @@ class Node(Base):
     # Metadata
     arch: Mapped[str] = mapped_column(String(10), default="x86_64")
     boot_mode: Mapped[str] = mapped_column(String(4), default="bios")
+    pi_model: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     # Relationships
     group_id: Mapped[str | None] = mapped_column(ForeignKey("device_groups.id"))
