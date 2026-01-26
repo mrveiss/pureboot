@@ -1,7 +1,8 @@
 """Tests for variable resolver service."""
 import pytest
 
-from src.core.variable_resolver import VariableResolver, KNOWN_NAMESPACES
+from src.core.variable_resolver import VariableResolver, KNOWN_NAMESPACES, build_context
+from src.db.models import Node, Workflow, DeviceGroup, WorkflowStep, WorkflowExecution
 
 
 class TestVariableResolver:
@@ -225,3 +226,109 @@ class TestKnownNamespaces:
         """All expected namespaces are defined."""
         expected = {"node", "group", "workflow", "server", "template", "execution", "meta", "secret"}
         assert set(KNOWN_NAMESPACES.keys()) == expected
+
+
+class TestBuildContext:
+    """Test context building from models."""
+
+    def test_build_context_from_node(self, test_db):
+        """build_context creates context from Node model."""
+        node = Node(
+            mac_address="aa:bb:cc:dd:ee:ff",
+            hostname="server-01",
+            ip_address="192.168.1.100",
+        )
+        test_db.add(node)
+        test_db.flush()
+
+        context = build_context(node=node)
+
+        assert context["node"]["mac"] == "aa:bb:cc:dd:ee:ff"
+        assert context["node"]["hostname"] == "server-01"
+        assert context["node"]["ip"] == "192.168.1.100"
+
+    def test_build_context_with_group(self, test_db):
+        """build_context includes group data."""
+        group = DeviceGroup(name="production", description="Production servers")
+        test_db.add(group)
+        test_db.flush()
+
+        node = Node(mac_address="aa:bb:cc:dd:ee:ff", group_id=group.id)
+        test_db.add(node)
+        test_db.flush()
+        test_db.refresh(node)
+
+        context = build_context(node=node)
+
+        assert context["group"]["name"] == "production"
+        assert context["group"]["description"] == "Production servers"
+
+    def test_build_context_with_workflow(self, test_db):
+        """build_context includes workflow data."""
+        workflow = Workflow(name="ubuntu-2404", description="Ubuntu Server", os_family="linux")
+        test_db.add(workflow)
+        test_db.flush()
+
+        context = build_context(workflow=workflow)
+
+        assert context["workflow"]["name"] == "ubuntu-2404"
+        assert context["workflow"]["description"] == "Ubuntu Server"
+
+    def test_build_context_with_execution(self, test_db):
+        """build_context includes execution data."""
+        node = Node(mac_address="aa:bb:cc:dd:ee:ff")
+        workflow = Workflow(name="test-wf", os_family="linux")
+        test_db.add_all([node, workflow])
+        test_db.flush()
+
+        step = WorkflowStep(workflow_id=workflow.id, sequence=1, name="Boot Step", type="boot")
+        test_db.add(step)
+        test_db.flush()
+
+        execution = WorkflowExecution(
+            node_id=node.id,
+            workflow_id=workflow.id,
+            current_step_id=step.id,
+            status="running",
+        )
+        test_db.add(execution)
+        test_db.flush()
+        test_db.refresh(execution)
+
+        context = build_context(execution=execution)
+
+        assert context["execution"]["id"] == execution.id
+        assert context["execution"]["step_id"] == step.id
+        assert context["execution"]["step_name"] == "Boot Step"
+
+    def test_build_context_with_server_urls(self):
+        """build_context includes server URLs."""
+        context = build_context(
+            server_url="http://server:8080",
+            tftp_url="tftp://10.0.0.1",
+            http_url="http://10.0.0.1",
+        )
+
+        assert context["server"]["url"] == "http://server:8080"
+        assert context["server"]["tftp_url"] == "tftp://10.0.0.1"
+        assert context["server"]["http_url"] == "http://10.0.0.1"
+
+    def test_build_context_with_metadata(self):
+        """build_context includes metadata in meta namespace."""
+        metadata = {"location": "rack-5", "env": "production"}
+
+        context = build_context(metadata=metadata)
+
+        assert context["meta"]["location"] == "rack-5"
+        assert context["meta"]["env"] == "production"
+
+    def test_build_context_empty(self):
+        """build_context returns empty context when no parameters."""
+        context = build_context()
+
+        assert context["node"] == {}
+        assert context["group"] == {}
+        assert context["workflow"] == {}
+        assert context["execution"] == {}
+        assert context["meta"] == {}
+        assert context["server"]["url"] == ""

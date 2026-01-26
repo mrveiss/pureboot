@@ -1,6 +1,11 @@
 """Variable resolution service for templates."""
+from __future__ import annotations
+
 import re
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.db.models import Node, Workflow, WorkflowExecution
 
 
 KNOWN_NAMESPACES: dict[str, set[str]] = {
@@ -105,3 +110,77 @@ class VariableResolver:
             elif namespace not in ("meta", "secret") and key not in KNOWN_NAMESPACES[namespace]:
                 errors.append(f"Unknown variable: {namespace}.{key}")
         return errors
+
+
+def build_context(
+    node: Node | None = None,
+    workflow: Workflow | None = None,
+    execution: WorkflowExecution | None = None,
+    server_url: str = "",
+    tftp_url: str = "",
+    http_url: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Build variable context from model objects.
+
+    Args:
+        node: Node model instance
+        workflow: Workflow model instance
+        execution: WorkflowExecution model instance
+        server_url: Base server URL
+        tftp_url: TFTP server URL
+        http_url: HTTP server URL
+        metadata: Additional custom metadata
+
+    Returns:
+        Context dictionary suitable for VariableResolver
+    """
+    context: dict[str, dict[str, Any]] = {
+        "node": {},
+        "group": {},
+        "workflow": {},
+        "server": {
+            "url": server_url,
+            "tftp_url": tftp_url,
+            "http_url": http_url,
+        },
+        "execution": {},
+        "meta": metadata or {},
+    }
+
+    if node:
+        context["node"] = {
+            "id": node.id,
+            "mac": node.mac_address,
+            "ip": node.ip_address,
+            "hostname": node.hostname,
+            "uuid": node.system_uuid,
+            "serial": node.serial_number,
+            "vendor": node.vendor,
+            "model": node.model,
+            "architecture": node.arch,
+            "boot_mode": node.boot_mode,
+            "state": node.state,
+        }
+        if node.group:
+            context["group"] = {
+                "id": node.group.id,
+                "name": node.group.name,
+                "description": node.group.description,
+            }
+
+    if workflow:
+        context["workflow"] = {
+            "id": workflow.id,
+            "name": workflow.name,
+            "description": workflow.description,
+        }
+
+    if execution:
+        context["execution"] = {
+            "id": execution.id,
+            "step_id": execution.current_step_id,
+            "step_name": execution.current_step.name if execution.current_step else None,
+        }
+
+    return context
