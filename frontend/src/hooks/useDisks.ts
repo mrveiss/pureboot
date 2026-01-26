@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { disksApi } from '@/api/disks'
-import type { Disk, PartitionOperation, PartitionOperationRequest } from '@/types/partition'
+import type { PartitionOperationRequest } from '@/types/partition'
 
 // Query keys for disk-related queries
 export const diskKeys = {

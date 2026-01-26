@@ -34,7 +34,7 @@ import { cn } from '@/lib/utils'
  * Clone Mode option card component
  */
 function CloneModeCard({
-  mode,
+  mode: _mode,
   title,
   description,
   icon: Icon,

@@ -255,7 +255,9 @@ function PartitionRow({ partition, onChange, disabled }: PartitionRowProps) {
 
       {/* Resize capability */}
       {!partition.can_resize && (
-        <AlertTriangle className="h-4 w-4 text-yellow-500" title="Cannot resize this partition" />
+        <span title="Cannot resize this partition">
+          <AlertTriangle className="h-4 w-4 text-yellow-500" />
+        </span>
       )}
     </div>
   )

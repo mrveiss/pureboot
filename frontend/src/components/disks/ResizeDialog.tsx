@@ -49,7 +49,6 @@ export function ResizeDialog({
   const minSizeBytes = partition.min_size_bytes ?? partition.used_bytes ?? 1024 * 1024 // 1MB minimum
 
   // Max size: partition size + available space after partition
-  const partitionEndBytes = partition.end_bytes
   const diskSizeBytes = disk.size_bytes
 
   // Find next partition to determine max available space

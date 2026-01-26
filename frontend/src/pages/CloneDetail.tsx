@@ -16,8 +16,6 @@ import {
   Upload,
   Download,
   Database,
-  CloudUpload,
-  CloudDownload,
   Package,
 } from 'lucide-react'
 import {
@@ -149,7 +147,7 @@ const STAGING_PHASES: {
   {
     status: 'uploading',
     label: 'Uploading',
-    icon: CloudUpload,
+    icon: Upload,
     color: 'text-yellow-500',
     bgColor: 'bg-yellow-100',
   },
@@ -163,7 +161,7 @@ const STAGING_PHASES: {
   {
     status: 'downloading',
     label: 'Downloading',
-    icon: CloudDownload,
+    icon: Download,
     color: 'text-purple-500',
     bgColor: 'bg-purple-100',
   },

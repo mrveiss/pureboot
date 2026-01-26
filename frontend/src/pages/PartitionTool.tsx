@@ -107,8 +107,7 @@ export function PartitionTool() {
   const node = nodeResponse?.data
 
   // Fetch disks for this node
-  const { data: disksResponse, isLoading, error, refetch } = useNodeDisks(nodeId)
-  const disks = disksResponse?.data ?? []
+  const { data: disks = [], isLoading, error, refetch } = useNodeDisks(nodeId)
 
   // Trigger disk scan mutation
   const triggerScan = useTriggerDiskScan()
@@ -137,11 +136,10 @@ export function PartitionTool() {
   }, [disks, selectedDiskDevice])
 
   // Fetch operations for selected disk
-  const { data: operationsResponse } = usePartitionOperations(
+  const { data: operations = [] } = usePartitionOperations(
     nodeId,
     selectedDisk?.device
   )
-  const operations = operationsResponse?.data ?? []
 
   // Mutations for partition operations
   const queueOperation = useQueueOperation()
