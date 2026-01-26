@@ -1,0 +1,23 @@
+# Staged Clone Target Workflow
+# Boots into deploy environment to download disk image from storage backend
+id: clone-target-staged
+name: Clone Target (Staged)
+description: Boot into deploy environment to download disk image from storage backend for staged cloning
+
+# Install method: deploy - boots minimal environment for cloning
+install_method: deploy
+
+# Boot into clone target staged mode
+boot_params:
+  pureboot.mode: clone_target_staged
+  # session_id, device, and storage backend config set dynamically by controller
+
+# Architecture and boot mode
+architecture: x86_64
+boot_mode: uefi
+
+# Tags for filtering and categorization
+tags:
+  - clone
+  - staged
+  - target
