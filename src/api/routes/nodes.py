@@ -287,6 +287,7 @@ async def create_node(
         model=node_data.model,
         serial_number=node_data.serial_number,
         system_uuid=node_data.system_uuid,
+        pi_model=node_data.pi_model,
     )
     db.add(node)
     await db.flush()
