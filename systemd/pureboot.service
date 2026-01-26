@@ -22,7 +22,7 @@ SyslogIdentifier=pureboot
 NoNewPrivileges=false
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/pureboot/data /opt/pureboot/tftp
+ReadWritePaths=/opt/pureboot/data /opt/pureboot/tftp /opt/pureboot/certs
 PrivateTmp=true
 
 [Install]
