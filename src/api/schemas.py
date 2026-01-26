@@ -583,6 +583,7 @@ class StorageBackendStats(BaseModel):
 
     used_bytes: int
     total_bytes: int | None
+    available_bytes: int | None = None
     file_count: int
     template_count: int = 0
 
@@ -596,6 +597,7 @@ class StorageBackendResponse(BaseModel):
     name: str
     type: str
     status: str
+    enabled: bool = True
     config: dict
     stats: StorageBackendStats
     created_at: datetime
@@ -609,15 +611,25 @@ class StorageBackendResponse(BaseModel):
         config.pop("password", None)
         config.pop("secret_access_key", None)
 
+        # Calculate available bytes if total is known
+        available_bytes = None
+        if backend.total_bytes is not None:
+            available_bytes = max(0, backend.total_bytes - backend.used_bytes)
+
+        # Derive enabled from status (enabled if not explicitly offline)
+        enabled = backend.status != "offline"
+
         return cls(
             id=backend.id,
             name=backend.name,
             type=backend.type,
             status=backend.status,
+            enabled=enabled,
             config=config,
             stats=StorageBackendStats(
                 used_bytes=backend.used_bytes,
                 total_bytes=backend.total_bytes,
+                available_bytes=available_bytes,
                 file_count=backend.file_count,
             ),
             created_at=backend.created_at,
