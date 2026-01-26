@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 MAC_PATTERN = re.compile(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$")
+PI_SERIAL_PATTERN = re.compile(r"^[0-9a-f]{8}$")
 
 
 def normalize_mac(mac: str) -> str:
@@ -256,6 +257,168 @@ class NodeHistoryResponse(BaseModel):
 
     data: list[NodeStateLogResponse]
     total: int
+
+
+# ============== Raspberry Pi Schemas ==============
+
+
+class PiRegisterRequest(BaseModel):
+    """Schema for registering a Raspberry Pi node.
+
+    Used by Pi deploy environments to register themselves with the controller
+    during network boot. The serial number is used as the primary identifier
+    for Pi devices.
+
+    Example:
+        ```json
+        {
+            "serial": "d83add36",
+            "mac": "dc:a6:32:12:34:56",
+            "model": "pi4",
+            "ip_address": "192.168.1.100"
+        }
+        ```
+    """
+
+    serial: str = Field(
+        ...,
+        description="Pi serial number (8 hex characters from /proc/cpuinfo)",
+        examples=["d83add36", "0000000a"],
+    )
+    mac: str = Field(
+        ...,
+        description="MAC address of the Pi's ethernet interface",
+        examples=["dc:a6:32:12:34:56", "e4:5f:01:ab:cd:ef"],
+    )
+    model: str = Field(
+        "pi4",
+        description="Raspberry Pi model identifier",
+        examples=["pi3", "pi4", "pi5"],
+    )
+    ip_address: str | None = Field(
+        None,
+        description="Current IP address of the Pi",
+        examples=["192.168.1.100", "10.0.0.50"],
+    )
+
+    @field_validator("serial")
+    @classmethod
+    def validate_serial(cls, v: str) -> str:
+        """Validate and normalize Pi serial number.
+
+        Pi serial numbers are 8 hex characters, normalized to lowercase.
+        """
+        normalized = v.lower()
+        if not PI_SERIAL_PATTERN.match(normalized):
+            raise ValueError(
+                f"Invalid Pi serial number: {v}. "
+                "Must be exactly 8 hexadecimal characters."
+            )
+        return normalized
+
+    @field_validator("mac")
+    @classmethod
+    def validate_mac(cls, v: str) -> str:
+        """Validate and normalize MAC address."""
+        if not MAC_PATTERN.match(v):
+            raise ValueError(f"Invalid MAC address format: {v}")
+        return normalize_mac(v)
+
+    @field_validator("model")
+    @classmethod
+    def validate_model(cls, v: str) -> str:
+        """Validate Pi model identifier."""
+        valid_models = {"pi3", "pi4", "pi5"}
+        if v not in valid_models:
+            raise ValueError(
+                f"Invalid Pi model: {v}. Must be one of {sorted(valid_models)}"
+            )
+        return v
+
+
+class PiBootResponse(BaseModel):
+    """Response schema for Pi boot endpoint.
+
+    Returned by the controller to tell the Pi deploy environment what action
+    to take based on the node's current state.
+
+    Actions:
+        - deploy_image: Download and write image to target device
+        - nfs_boot: Boot from NFS root (diskless operation)
+        - local_boot: Boot from local storage (SD card / NVMe)
+
+    Example (deploy_image):
+        ```json
+        {
+            "state": "installing",
+            "message": "Deploying Ubuntu Server 24.04 ARM64",
+            "action": "deploy_image",
+            "image_url": "http://pureboot.local/images/ubuntu-arm64.img.xz",
+            "target_device": "/dev/mmcblk0",
+            "callback_url": "http://pureboot.local/api/v1/nodes/abc123/report"
+        }
+        ```
+
+    Example (nfs_boot):
+        ```json
+        {
+            "state": "installing",
+            "action": "nfs_boot",
+            "nfs_server": "192.168.1.10",
+            "nfs_path": "/srv/nfs/pi-roots/node-abc123"
+        }
+        ```
+
+    Example (local_boot):
+        ```json
+        {
+            "state": "active",
+            "action": "local_boot",
+            "message": "Boot from local SD card"
+        }
+        ```
+    """
+
+    state: str = Field(
+        ...,
+        description="Current state of the node in the state machine",
+        examples=["discovered", "pending", "installing", "active"],
+    )
+    message: str | None = Field(
+        None,
+        description="Human-readable status message",
+        examples=["Waiting for approval", "Deploying Ubuntu Server 24.04"],
+    )
+    action: str | None = Field(
+        None,
+        description="Action for the deploy environment to take",
+        examples=["deploy_image", "nfs_boot", "local_boot"],
+    )
+    image_url: str | None = Field(
+        None,
+        description="URL of the disk image to deploy",
+        examples=["http://pureboot.local/images/ubuntu-arm64.img.xz"],
+    )
+    target_device: str | None = Field(
+        None,
+        description="Target device for image deployment",
+        examples=["/dev/mmcblk0", "/dev/nvme0n1"],
+    )
+    callback_url: str | None = Field(
+        None,
+        description="URL to call when deployment is complete",
+        examples=["http://pureboot.local/api/v1/nodes/abc123/report"],
+    )
+    nfs_server: str | None = Field(
+        None,
+        description="NFS server IP or hostname for diskless boot",
+        examples=["192.168.1.10", "nfs.local"],
+    )
+    nfs_path: str | None = Field(
+        None,
+        description="NFS path to root filesystem for diskless boot",
+        examples=["/srv/nfs/pi-roots/node-abc123"],
+    )
 
 
 # ============== Device Group Schemas ==============
