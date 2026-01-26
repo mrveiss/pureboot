@@ -302,27 +302,46 @@ exit
     return header + boot_commands
 
 
-def generate_pending_no_workflow_script(node: Node) -> str:
-    """Generate iPXE script for pending node without workflow."""
+def generate_pending_no_workflow_script(node: Node, server: str) -> str:
+    """Generate iPXE script for pending node without workflow.
+
+    Node will poll server until a workflow is assigned.
+    """
     short_id = node.mac_address.replace(":", "")[-6:].upper()
+    mac = node.mac_address
     return f"""#!ipxe
 # PureBoot - Pending (no workflow assigned)
-# Node: {node.mac_address}
+# Node: {mac}
+
+:start
 echo
 echo ========================================
-echo   PureBoot - No Workflow Assigned
+echo   PureBoot - Awaiting Workflow
 echo ========================================
 echo
 echo   Node ID:  {short_id}
-echo   MAC:      {node.mac_address}
+echo   MAC:      {mac}
 echo   IP:       ${{net0/ip}}
+echo   Status:   Pending - awaiting workflow assignment
 echo
-echo   Node is pending but no workflow assigned.
-echo   Please assign a workflow in the PureBoot UI.
+echo   Assign a workflow in the PureBoot UI.
+echo   Press ESC to skip and boot from local disk.
 echo
-echo   Booting from local disk in 10 seconds...
+
+:wait
+echo [{short_id}] Polling for workflow assignment...
+prompt --key 0x1b --timeout 10000 Press ESC to skip... && goto skip ||
+chain {server}/api/v1/boot?mac={mac} || goto retry
+
+:retry
+echo [{short_id}] Server unreachable, retry in 10s (ESC to skip)...
+prompt --key 0x1b --timeout 10000 && goto skip ||
+goto wait
+
+:skip
 echo
-sleep 10
+echo Skipping PureBoot - booting from local disk...
+echo
 exit
 """
 
@@ -445,7 +464,7 @@ async def get_boot_script(
         case "pending":
             # Check if workflow is assigned
             if not node.workflow_id:
-                return generate_pending_no_workflow_script(node)
+                return generate_pending_no_workflow_script(node, server)
 
             # Load workflow and generate install script
             try:
