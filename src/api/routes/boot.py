@@ -305,7 +305,9 @@ exit
 def generate_pending_no_workflow_script(node: Node, server: str) -> str:
     """Generate iPXE script for pending node without workflow.
 
-    Node will poll server until a workflow is assigned.
+    Node will poll /boot/status endpoint until a workflow is assigned.
+    The status endpoint returns a small script that either chains to /boot
+    (when ready) or sleeps and re-polls (when waiting).
     """
     short_id = node.mac_address.replace(":", "")[-6:].upper()
     mac = node.mac_address
@@ -328,15 +330,15 @@ echo   Assign a workflow in the PureBoot UI.
 echo   Press ESC to skip and boot from local disk.
 echo
 
-:wait
-echo [{short_id}] Polling for workflow assignment...
-prompt --key 0x1b --timeout 10000 Press ESC to skip... && goto skip ||
-chain {server}/api/v1/boot?mac={mac} || goto retry
+:poll
+echo [{short_id}] Checking for workflow...
+chain {server}/api/v1/boot/status?mac={mac} || goto retry
 
 :retry
-echo [{short_id}] Server unreachable, retry in 10s (ESC to skip)...
+echo [{short_id}] Server unreachable, retry in 10s...
+echo Press ESC to skip and boot from local disk.
 prompt --key 0x1b --timeout 10000 && goto skip ||
-goto wait
+goto poll
 
 :skip
 echo
@@ -609,4 +611,59 @@ menuentry "{title}" {{
 menuentry "Boot from local disk" {{
     exit
 }}
+"""
+
+
+@router.get("/boot/status", response_class=PlainTextResponse)
+async def get_boot_status(
+    mac: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> str:
+    """
+    Return iPXE script for workflow status polling.
+
+    This endpoint is used by pending nodes to check if a workflow has been
+    assigned. Returns a script that either:
+    - Chains to /boot if workflow is assigned (ready to install)
+    - Sleeps and re-polls if still waiting for workflow
+    """
+    mac = validate_mac(mac)
+    server = f"http://{settings.host}:{settings.port}"
+    short_id = mac.replace(":", "")[-6:].upper()
+
+    # Look up node by MAC
+    result = await db.execute(select(Node).where(Node.mac_address == mac))
+    node = result.scalar_one_or_none()
+
+    if not node:
+        # Node not found - tell it to boot local
+        return generate_local_boot_script()
+
+    # Update last seen
+    node.last_seen_at = datetime.now(timezone.utc)
+    if request.client:
+        node.ip_address = request.client.host
+
+    # Check if workflow is assigned
+    if node.state == "pending" and node.workflow_id:
+        # Workflow assigned - chain to main boot endpoint
+        return f"""#!ipxe
+# Workflow assigned - proceeding to install
+echo [{short_id}] Workflow assigned: {node.workflow_id}
+echo Starting installation...
+chain {server}/api/v1/boot?mac={mac}
+"""
+
+    # Still waiting - sleep and re-poll
+    return f"""#!ipxe
+# Still waiting for workflow assignment
+echo [{short_id}] Waiting for workflow...
+echo Press ESC to skip and boot from local disk.
+prompt --key 0x1b --timeout 10000 && goto skip ||
+chain {server}/api/v1/boot/status?mac={mac}
+
+:skip
+echo Skipping - booting from local disk...
+exit
 """
