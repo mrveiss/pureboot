@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from src.api.routes import boot, ipxe, nodes, groups, storage, files, luns, system
+from src.api.routes import boot, boot_pi, ipxe, nodes, groups, storage, files, luns, system
 from src.api.routes.sync_jobs import router as sync_jobs_router
 from src.api.routes.workflows import router as workflows_router
 from src.api.routes.templates import router as templates_router
@@ -281,6 +281,10 @@ app = FastAPI(
             "description": "PXE/iPXE boot endpoints - serve boot configurations",
         },
         {
+            "name": "boot-pi",
+            "description": "Raspberry Pi boot endpoints - TFTP-based network boot for ARM64 Pi devices",
+        },
+        {
             "name": "ipxe",
             "description": "iPXE-specific endpoints for network boot",
         },
@@ -324,6 +328,7 @@ app.add_middleware(AuthMiddleware)
 
 # Mount API routes
 app.include_router(boot.router, prefix="/api/v1", tags=["boot"])
+app.include_router(boot_pi.router, prefix="/api/v1", tags=["boot-pi"])
 app.include_router(ipxe.router, prefix="/api/v1", tags=["ipxe"])
 app.include_router(nodes.router, prefix="/api/v1", tags=["nodes"])
 app.include_router(groups.router, prefix="/api/v1", tags=["groups"])
