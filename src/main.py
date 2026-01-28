@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from src.api.routes import boot, ipxe, nodes, groups, storage, files, luns, system
+from src.api.routes import boot, ipxe, nodes, groups, storage, files, luns, system, sites, agents
 from src.api.routes.sync_jobs import router as sync_jobs_router
 from src.api.routes.workflows import router as workflows_router
 from src.api.routes.templates import router as templates_router
@@ -26,6 +26,7 @@ from src.api.routes.audit import router as audit_router
 from src.api.routes.ldap import router as ldap_router
 from src.api.routes.clone import router as clone_router
 from src.api.routes.disks import router as disks_router
+from src.api.routes.callbacks import router as callbacks_router
 from src.api.middleware.auth import AuthMiddleware
 from src.core.ca import ca_service
 from src.db.database import init_db, close_db, async_session_factory
@@ -34,6 +35,7 @@ from src.pxe.tftp_server import TFTPServer
 from src.pxe.dhcp_proxy import DHCPProxy
 from src.core.scheduler import sync_scheduler
 from src.core.escalation_job import process_escalations
+from src.core.agent_status_job import update_agent_statuses
 from src.services.audit import audit_service
 
 logging.basicConfig(
@@ -124,6 +126,16 @@ async def lifespan(app: FastAPI):
         replace_existing=True
     )
     logger.info("Escalation check job scheduled (every 5 minutes)")
+
+    # Schedule agent status update job (for multi-site management)
+    sync_scheduler.scheduler.add_job(
+        update_agent_statuses,
+        'interval',
+        minutes=1,
+        id='agent_status_update',
+        replace_existing=True
+    )
+    logger.info("Agent status update job scheduled (every 1 minute)")
 
     # Initialize CA service
     ca_service.initialize()
@@ -245,6 +257,14 @@ app = FastAPI(
             "description": "Device groups for organizing and managing nodes",
         },
         {
+            "name": "sites",
+            "description": "Multi-site management - physical locations with site agents",
+        },
+        {
+            "name": "agents",
+            "description": "Site agent registration and heartbeat endpoints",
+        },
+        {
             "name": "auth",
             "description": "Authentication endpoints - login, logout, token refresh",
         },
@@ -316,6 +336,10 @@ app = FastAPI(
             "name": "disks",
             "description": "Disk and partition information - scan and retrieve disk layouts from nodes",
         },
+        {
+            "name": "callbacks",
+            "description": "Callback endpoints for provisioning agents to report step progress",
+        },
     ],
 )
 
@@ -327,6 +351,8 @@ app.include_router(boot.router, prefix="/api/v1", tags=["boot"])
 app.include_router(ipxe.router, prefix="/api/v1", tags=["ipxe"])
 app.include_router(nodes.router, prefix="/api/v1", tags=["nodes"])
 app.include_router(groups.router, prefix="/api/v1", tags=["groups"])
+app.include_router(sites.router, prefix="/api/v1", tags=["sites"])
+app.include_router(agents.router, prefix="/api/v1", tags=["agents"])
 app.include_router(storage.router, prefix="/api/v1", tags=["storage"])
 app.include_router(files.router, prefix="/api/v1", tags=["files"])
 app.include_router(luns.router, prefix="/api/v1", tags=["luns"])
@@ -348,6 +374,7 @@ app.include_router(audit_router, prefix="/api/v1", tags=["audit"])
 app.include_router(ldap_router, prefix="/api/v1", tags=["ldap"])
 app.include_router(clone_router, prefix="/api/v1", tags=["clone-sessions"])
 app.include_router(disks_router, prefix="/api/v1", tags=["disks"])
+app.include_router(callbacks_router, prefix="/api/v1", tags=["callbacks"])
 
 # Static assets directory
 assets_dir = Path("assets")
