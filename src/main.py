@@ -2,6 +2,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -34,9 +35,11 @@ from src.db.database import init_db, close_db, async_session_factory
 from src.config import settings
 from src.pxe.tftp_server import TFTPServer
 from src.pxe.dhcp_proxy import DHCPProxy
+from sqlalchemy import select
 from src.core.scheduler import sync_scheduler
 from src.core.escalation_job import process_escalations
 from src.core.agent_status_job import update_agent_statuses
+from src.db.models import Node, NodeHealthSnapshot
 from src.services.audit import audit_service
 
 logging.basicConfig(
@@ -138,6 +141,39 @@ async def lifespan(app: FastAPI):
     )
     logger.info("Agent status update job scheduled (every 1 minute)")
 
+    # Schedule health check job (every minute)
+    sync_scheduler.scheduler.add_job(
+        _health_check_job,
+        'interval',
+        minutes=1,
+        id='health_check',
+        replace_existing=True,
+    )
+    logger.info("Health check job scheduled (every 1 minute)")
+
+    # Schedule health snapshot job
+    sync_scheduler.scheduler.add_job(
+        _health_snapshot_job,
+        'interval',
+        minutes=settings.health.snapshot_interval_minutes,
+        id='health_snapshot',
+        replace_existing=True,
+    )
+    logger.info(
+        f"Health snapshot job scheduled (every {settings.health.snapshot_interval_minutes} minutes)"
+    )
+
+    # Schedule health cleanup job (daily at 3 AM)
+    sync_scheduler.scheduler.add_job(
+        _health_cleanup_job,
+        'cron',
+        hour=3,
+        minute=0,
+        id='health_cleanup',
+        replace_existing=True,
+    )
+    logger.info("Health snapshot cleanup job scheduled (daily at 3:00 AM)")
+
     # Initialize CA service
     ca_service.initialize()
     logger.info("CA service initialized")
@@ -189,6 +225,92 @@ async def _register_scheduled_jobs():
 
         await db.commit()
         logger.info(f"Re-registered {len(jobs)} scheduled sync jobs")
+
+
+async def _health_check_job():
+    """Periodic health check for all nodes."""
+    from src.core.health_service import HealthService
+    from src.core.websocket import global_ws_manager
+
+    if not async_session_factory:
+        return
+
+    async with async_session_factory() as db:
+        try:
+            new_alerts = await HealthService.check_all_nodes(db)
+            await db.commit()
+
+            # Broadcast new alerts via WebSocket
+            for alert in new_alerts:
+                await global_ws_manager.broadcast(
+                    "health:alert_created",
+                    {
+                        "id": alert.id,
+                        "node_id": alert.node_id,
+                        "alert_type": alert.alert_type,
+                        "severity": alert.severity,
+                        "message": alert.message,
+                    },
+                )
+
+            # Broadcast updated summary
+            if new_alerts:
+                async with async_session_factory() as db2:
+                    summary = await HealthService.get_summary(db2)
+                    await global_ws_manager.broadcast(
+                        "health:summary_updated", summary
+                    )
+
+        except Exception:
+            logger.exception("Health check job failed")
+
+
+async def _health_snapshot_job():
+    """Create health snapshots for all non-retired nodes."""
+    from src.core.health_service import HealthService
+
+    if not async_session_factory:
+        return
+
+    async with async_session_factory() as db:
+        try:
+            result = await db.execute(
+                select(Node).where(Node.state != "retired")
+            )
+            nodes = result.scalars().all()
+
+            for node in nodes:
+                await HealthService.create_snapshot(db, node)
+
+            await db.commit()
+            logger.debug(f"Created health snapshots for {len(nodes)} nodes")
+        except Exception:
+            logger.exception("Health snapshot job failed")
+
+
+async def _health_cleanup_job():
+    """Delete old health snapshots beyond retention period."""
+    from sqlalchemy import delete
+
+    if not async_session_factory:
+        return
+
+    async with async_session_factory() as db:
+        try:
+            cutoff = datetime.now(timezone.utc) - timedelta(
+                days=settings.health.snapshot_retention_days
+            )
+            result = await db.execute(
+                delete(NodeHealthSnapshot).where(
+                    NodeHealthSnapshot.timestamp < cutoff
+                )
+            )
+            await db.commit()
+            deleted = result.rowcount
+            if deleted > 0:
+                logger.info(f"Cleaned up {deleted} old health snapshots")
+        except Exception:
+            logger.exception("Health cleanup job failed")
 
 
 OPENAPI_DESCRIPTION = """
