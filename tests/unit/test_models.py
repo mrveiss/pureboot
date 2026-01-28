@@ -18,6 +18,8 @@ from src.db.models import (
     SyncConflict,
     MigrationClaim,
     Approval,
+    StorageBackend,
+    FileChecksum,
 )
 
 
@@ -1036,3 +1038,64 @@ class TestStepResult:
         assert result.exit_code == 1
         assert result.message == "Script failed"
         assert "command not found" in result.logs
+
+
+class TestFileChecksumModel:
+    """Test FileChecksum model."""
+
+    def test_create_file_checksum(self, session):
+        """Create FileChecksum record with required fields."""
+        backend = StorageBackend(
+            name="test-nfs",
+            type="nfs",
+            config_json='{"server": "nfs.local", "path": "/export"}',
+        )
+        session.add(backend)
+        session.flush()
+
+        checksum = FileChecksum(
+            backend_id=backend.id,
+            file_path="/images/ubuntu-24.04.iso",
+            checksum_sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            size_bytes=5368709120,
+        )
+        session.add(checksum)
+        session.commit()
+
+        assert checksum.id is not None
+        assert checksum.backend_id == backend.id
+        assert checksum.file_path == "/images/ubuntu-24.04.iso"
+        assert len(checksum.checksum_sha256) == 64
+        assert checksum.size_bytes == 5368709120
+        assert checksum.computed_at is not None
+        assert checksum.backend.name == "test-nfs"
+
+    def test_file_checksum_unique_constraint(self, session):
+        """FileChecksum enforces unique constraint on backend_id + file_path."""
+        backend = StorageBackend(
+            name="test-nfs",
+            type="nfs",
+            config_json='{"server": "nfs.local", "path": "/export"}',
+        )
+        session.add(backend)
+        session.flush()
+
+        checksum1 = FileChecksum(
+            backend_id=backend.id,
+            file_path="/images/ubuntu.iso",
+            checksum_sha256="abc123" + "0" * 58,
+            size_bytes=1000,
+        )
+        session.add(checksum1)
+        session.commit()
+
+        checksum2 = FileChecksum(
+            backend_id=backend.id,
+            file_path="/images/ubuntu.iso",
+            checksum_sha256="def456" + "0" * 58,
+            size_bytes=2000,
+        )
+        session.add(checksum2)
+
+        with pytest.raises(Exception):  # IntegrityError
+            session.commit()

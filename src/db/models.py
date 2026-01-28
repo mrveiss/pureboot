@@ -280,6 +280,31 @@ class StorageBackend(Base):
     )
 
 
+class FileChecksum(Base):
+    """File checksum record for integrity tracking."""
+
+    __tablename__ = "file_checksums"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    backend_id: Mapped[str] = mapped_column(
+        ForeignKey("storage_backends.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    file_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    checksum_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    backend: Mapped["StorageBackend"] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint("backend_id", "file_path", name="uq_backend_file_path"),
+    )
+
+
 class IscsiLun(Base):
     """iSCSI LUN for boot-from-SAN and storage provisioning."""
 
