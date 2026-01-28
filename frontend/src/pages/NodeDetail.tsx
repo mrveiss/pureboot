@@ -593,14 +593,11 @@ export function NodeDetail() {
                   <SelectValue placeholder="Select a state..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {allStates.map((state) => (
-                    <SelectItem key={state} value={state} disabled={state === node.state}>
+                  {allStates.filter((state) => state !== node.state).map((state) => (
+                    <SelectItem key={state} value={state}>
                       <div className="flex items-center gap-2">
                         <div className={cn('h-2 w-2 rounded-full', NODE_STATE_COLORS[state])} />
                         <span>{NODE_STATE_LABELS[state]}</span>
-                        {state === node.state && (
-                          <span className="text-xs text-muted-foreground">(current)</span>
-                        )}
                       </div>
                     </SelectItem>
                   ))}

@@ -92,7 +92,9 @@ class DeviceGroup(Base):
         "DeviceGroup",
         back_populates="parent",
     )
-    nodes: Mapped[list["Node"]] = relationship(back_populates="group")
+    nodes: Mapped[list["Node"]] = relationship(
+        back_populates="group", foreign_keys="Node.group_id"
+    )
     user_groups: Mapped[list["UserGroup"]] = relationship(
         secondary="user_group_device_groups", back_populates="device_groups"
     )

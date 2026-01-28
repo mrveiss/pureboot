@@ -14,6 +14,7 @@ const STATE_POSITIONS: Record<NodeState, { x: number; y: number }> = {
   ignored: { x: 50, y: 200 },
   pending: { x: 200, y: 100 },
   installing: { x: 350, y: 100 },
+  install_failed: { x: 350, y: 300 },
   installed: { x: 500, y: 100 },
   active: { x: 650, y: 100 },
   reprovision: { x: 350, y: 200 },
