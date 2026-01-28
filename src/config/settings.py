@@ -153,6 +153,24 @@ class AgentSettings(BaseSettings):
     queue_max_retries: int = 3  # Max retry attempts
 
 
+class HealthSettings(BaseSettings):
+    """Node health monitoring settings."""
+    stale_threshold_minutes: int = 15
+    offline_threshold_minutes: int = 60
+    snapshot_interval_minutes: int = 5
+    snapshot_retention_days: int = 30
+
+    # Health score weights (should sum to 100)
+    score_staleness_weight: int = 40
+    score_install_failures_weight: int = 30
+    score_boot_stability_weight: int = 30
+
+    # Alerting
+    alert_on_stale: bool = True
+    alert_on_offline: bool = True
+    alert_on_score_below: int = 50  # 0 to disable
+
+
 class Settings(BaseSettings):
     """Main application settings."""
     model_config = SettingsConfigDict(
@@ -180,6 +198,7 @@ class Settings(BaseSettings):
     pi: PiSettings = Field(default_factory=PiSettings)
     nfs: NFSSettings = Field(default_factory=NFSSettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
+    health: HealthSettings = Field(default_factory=HealthSettings)
 
     # Installation timeout in minutes (0 = disabled)
     install_timeout_minutes: int = 60
