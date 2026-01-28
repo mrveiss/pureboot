@@ -59,8 +59,9 @@ async def get_pi_boot_instructions(
         None,
         description="MAC address for auto-registration",
     ),
-    request: Request,
     db: AsyncSession = Depends(get_db),
+    *,
+    request: Request,
 ) -> PiBootResponse:
     """Get boot instructions for a Raspberry Pi.
 
