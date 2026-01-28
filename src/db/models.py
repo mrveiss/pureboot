@@ -242,6 +242,33 @@ class NodeEvent(Base):
     node: Mapped["Node"] = relationship(back_populates="events")
 
 
+class NodeHealthSnapshot(Base):
+    """Point-in-time health snapshot for trend tracking."""
+
+    __tablename__ = "node_health_snapshots"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    timestamp: Mapped[datetime] = mapped_column(default=func.now(), index=True)
+    health_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    health_score: Mapped[int] = mapped_column(nullable=False)
+    last_seen_seconds_ago: Mapped[int] = mapped_column(nullable=False)
+    boot_count: Mapped[int] = mapped_column(default=0)
+    install_attempts: Mapped[int] = mapped_column(default=0)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+
+    # Relationship
+    node: Mapped["Node"] = relationship()
+
+    __table_args__ = (
+        Index("ix_health_snapshot_node_time", "node_id", "timestamp"),
+    )
+
+
 class NodeTag(Base):
     """Tag for categorizing nodes."""
 
