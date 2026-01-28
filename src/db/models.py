@@ -305,6 +305,16 @@ class FileChecksum(Base):
     )
 
 
+class SystemSetting(Base):
+    """Key-value store for system-wide settings."""
+
+    __tablename__ = "system_settings"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(default=func.now(), onupdate=func.now())
+
+
 class IscsiLun(Base):
     """iSCSI LUN for boot-from-SAN and storage provisioning."""
 
