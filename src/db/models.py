@@ -269,6 +269,39 @@ class NodeHealthSnapshot(Base):
     )
 
 
+class HealthAlert(Base):
+    """Health alert for node monitoring."""
+
+    __tablename__ = "health_alerts"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    alert_type: Mapped[str] = mapped_column(
+        String(30), nullable=False, index=True
+    )  # node_stale, node_offline, low_health_score, install_timeout
+    severity: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # warning, critical
+    status: Mapped[str] = mapped_column(
+        String(20), default="active", index=True
+    )  # active, acknowledged, resolved
+
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    acknowledged_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    acknowledged_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    # Relationship
+    node: Mapped["Node"] = relationship()
+
+
 class NodeTag(Base):
     """Tag for categorizing nodes."""
 
