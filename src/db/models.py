@@ -125,6 +125,17 @@ class Node(Base):
     # Metadata
     arch: Mapped[str] = mapped_column(String(10), default="x86_64")
     boot_mode: Mapped[str] = mapped_column(String(4), default="bios")
+
+    # Health monitoring
+    health_status: Mapped[str] = mapped_column(
+        String(20), default="unknown", index=True
+    )  # healthy, stale, offline, unknown
+    health_score: Mapped[int] = mapped_column(default=100)  # 0-100
+    boot_count: Mapped[int] = mapped_column(default=0)
+    last_boot_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_ip_change_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    previous_ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+
     pi_model: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     # Relationships
