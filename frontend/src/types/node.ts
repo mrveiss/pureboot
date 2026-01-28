@@ -3,6 +3,7 @@ export type NodeState =
   | 'ignored'
   | 'pending'
   | 'installing'
+  | 'install_failed'
   | 'installed'
   | 'active'
   | 'reprovision'
@@ -50,6 +51,7 @@ export const NODE_STATE_COLORS: Record<NodeState, string> = {
   ignored: 'bg-gray-500',
   pending: 'bg-yellow-500',
   installing: 'bg-orange-500',
+  install_failed: 'bg-red-600',
   installed: 'bg-teal-500',
   active: 'bg-green-500',
   reprovision: 'bg-purple-500',
@@ -64,6 +66,7 @@ export const NODE_STATE_LABELS: Record<NodeState, string> = {
   ignored: 'Ignored',
   pending: 'Pending',
   installing: 'Installing',
+  install_failed: 'Install Failed',
   installed: 'Installed',
   active: 'Active',
   reprovision: 'Reprovision',
@@ -78,7 +81,8 @@ export const NODE_STATE_TRANSITIONS: Record<NodeState, NodeState[]> = {
   discovered: ['pending', 'ignored'],
   ignored: ['discovered'],
   pending: ['installing'],
-  installing: ['installed'],
+  installing: ['installed', 'install_failed'],
+  install_failed: ['pending'],
   installed: ['active'],
   active: ['reprovision', 'migrating', 'retired'],
   reprovision: ['pending'],

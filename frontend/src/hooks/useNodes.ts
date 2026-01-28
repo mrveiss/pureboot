@@ -42,8 +42,8 @@ export function useUpdateNodeState() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ nodeId, newState }: { nodeId: string; newState: NodeState }) =>
-      nodesApi.updateState(nodeId, newState),
+    mutationFn: ({ nodeId, newState, force }: { nodeId: string; newState: NodeState; force?: boolean }) =>
+      nodesApi.updateState(nodeId, newState, force),
     onSuccess: (_, { nodeId }) => {
       queryClient.invalidateQueries({ queryKey: nodeKeys.detail(nodeId) })
       queryClient.invalidateQueries({ queryKey: nodeKeys.lists() })

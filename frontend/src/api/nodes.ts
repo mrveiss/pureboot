@@ -37,9 +37,10 @@ export const nodesApi = {
     return apiClient.patch<ApiResponse<Node>>(`/nodes/${nodeId}`, data)
   },
 
-  async updateState(nodeId: string, newState: string): Promise<ApiResponse<Node>> {
+  async updateState(nodeId: string, newState: string, force?: boolean): Promise<ApiResponse<Node>> {
     return apiClient.patch<ApiResponse<Node>>(`/nodes/${nodeId}/state`, {
-      state: newState
+      state: newState,
+      force: force ?? false
     })
   },
 

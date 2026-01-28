@@ -5,11 +5,13 @@ import {
   RefreshCw,
   X,
   Workflow,
+  AlertTriangle,
 } from 'lucide-react'
 import { Button, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, Input, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, Badge } from '@/components/ui'
 import { useSelectionStore } from '@/stores'
 import { useGroups, useBulkAssignGroup, useBulkAddTag, useBulkChangeState, useWorkflows, useBulkAssignWorkflow } from '@/hooks'
-import { NODE_STATE_LABELS, ARCHITECTURE_LABELS, BOOT_MODE_LABELS, type NodeState } from '@/types'
+import { NODE_STATE_LABELS, NODE_STATE_COLORS, ARCHITECTURE_LABELS, BOOT_MODE_LABELS, type NodeState } from '@/types'
+import { cn } from '@/lib/utils'
 
 type ActionDialogType = 'group' | 'tag' | 'state' | 'workflow' | null
 
@@ -74,7 +76,10 @@ export function BulkActionBar() {
     setSelectedState('')
   }
 
-  const allowedStates: NodeState[] = ['pending', 'retired', 'reprovision']
+  const allStates: NodeState[] = [
+    'discovered', 'ignored', 'pending', 'installing', 'install_failed', 'installed',
+    'active', 'reprovision', 'migrating', 'retired', 'decommissioned', 'wiping'
+  ]
 
   return (
     <>
@@ -194,20 +199,28 @@ export function BulkActionBar() {
       <Dialog open={activeDialog === 'state'} onOpenChange={(open) => !open && setActiveDialog(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Change State of {selectedCount} Nodes</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Change State of {selectedCount} Nodes
+            </DialogTitle>
           </DialogHeader>
-          <div className="py-4">
-            <p className="text-sm text-muted-foreground mb-4">
-              Note: State changes are only applied to nodes where the transition is valid.
-            </p>
+          <div className="py-4 space-y-4">
+            <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-3">
+              <p className="text-sm text-amber-200">
+                Bulk state changes attempt to transition each node. Nodes where the transition is invalid will be skipped.
+              </p>
+            </div>
             <Select value={selectedState} onValueChange={(v) => setSelectedState(v as NodeState)}>
               <SelectTrigger>
                 <SelectValue placeholder="Select new state..." />
               </SelectTrigger>
               <SelectContent>
-                {allowedStates.map((state) => (
+                {allStates.map((state) => (
                   <SelectItem key={state} value={state}>
-                    {NODE_STATE_LABELS[state]}
+                    <div className="flex items-center gap-2">
+                      <div className={cn('h-2 w-2 rounded-full', NODE_STATE_COLORS[state])} />
+                      <span>{NODE_STATE_LABELS[state]}</span>
+                    </div>
                   </SelectItem>
                 ))}
               </SelectContent>

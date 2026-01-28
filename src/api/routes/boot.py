@@ -49,16 +49,10 @@ def generate_discovery_script(mac: str, server: str) -> str:
 # PureBoot - Node discovered
 # MAC: {mac}
 
-:start
-echo
 echo
 echo  ************************************************************
-echo  *                                                          *
 echo  *                    P U R E B O O T                       *
 echo  *              Network Boot Management System              *
-echo  *                                                          *
-echo  *     Press ESC now to skip and boot from local disk       *
-echo  *                                                          *
 echo  ************************************************************
 echo
 echo   Node ID:  {short_id}
@@ -66,25 +60,7 @@ echo   MAC:      {mac}
 echo   IP:       ${{net0/ip}}
 echo   Server:   {server}
 echo
-echo   Status: Discovered - awaiting workflow assignment
-echo
-
-:prompt
-prompt --key 0x1b --timeout 10000 Press ESC to skip, waiting 10s... && goto skip ||
-
-:wait
-echo
-echo [{short_id}] Polling server for workflow...
-chain {server}/api/v1/boot?mac={mac} || goto retry
-
-:retry
-echo [{short_id}] Server unreachable, retry in 30s (ESC to skip)...
-prompt --key 0x1b --timeout 30000 && goto skip ||
-goto wait
-
-:skip
-echo
-echo Skipping PureBoot - booting from local disk...
+echo   Status: Discovered - booting from local disk
 echo
 exit
 """
@@ -327,7 +303,6 @@ echo   IP:       ${{net0/ip}}
 echo   Status:   Pending - awaiting workflow assignment
 echo
 echo   Assign a workflow in the PureBoot UI.
-echo   Press ESC to skip and boot from local disk.
 echo
 
 :poll
@@ -336,15 +311,8 @@ chain {server}/api/v1/boot/status?mac={mac} || goto retry
 
 :retry
 echo [{short_id}] Server unreachable, retry in 10s...
-echo Press ESC to skip and boot from local disk.
-prompt --key 0x1b --timeout 10000 && goto skip ||
+sleep 10
 goto poll
-
-:skip
-echo
-echo Skipping PureBoot - booting from local disk...
-echo
-exit
 """
 
 
@@ -666,16 +634,11 @@ goto start
 # Still waiting for workflow assignment
 :poll
 echo [{short_id}] Waiting for workflow...
-echo Press ESC to skip and boot from local disk.
-prompt --key 0x1b --timeout 10000 && goto skip ||
+sleep 10
 chain {server}/api/v1/boot/status?mac={mac} || goto retry
 
 :retry
 echo [{short_id}] Server unreachable, retrying in 5s...
 sleep 5
 goto poll
-
-:skip
-echo Skipping - booting from local disk...
-exit
 """

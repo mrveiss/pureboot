@@ -49,7 +49,7 @@ class StateTransitionService:
         """
         from_state = node.state
 
-        # Check retry limit for install_failed -> pending
+        # Check retry limit for install_failed -> pending (unless forcing)
         if (
             from_state == "install_failed"
             and to_state == "pending"
@@ -61,8 +61,8 @@ class StateTransitionService:
                 "Use force=true to reset and retry."
             )
 
-        # Validate transition
-        if not NodeStateMachine.can_transition(from_state, to_state):
+        # Validate transition (skip if force=True to allow any state change)
+        if not force and not NodeStateMachine.can_transition(from_state, to_state):
             raise InvalidStateTransition(from_state, to_state)
 
         # Apply transition

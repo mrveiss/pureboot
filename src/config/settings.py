@@ -31,7 +31,6 @@ class DHCPProxySettings(BaseSettings):
 class BootMenuSettings(BaseSettings):
     """Boot menu settings."""
     timeout: int = 5
-    show_menu: bool = True
     logo_url: str = "/assets/pureboot-logo.png"
 
 
