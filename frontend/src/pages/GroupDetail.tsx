@@ -9,12 +9,19 @@ import {
   Badge,
 } from '@/components/ui'
 import { NodeTable } from '@/components/nodes/NodeTable'
-import { useGroup, useGroupNodes } from '@/hooks'
+import { useGroup, useGroupNodes, useSite } from '@/hooks'
+import { SiteDetailPage } from './SiteDetailPage'
 
 export function GroupDetail() {
   const { groupId } = useParams<{ groupId: string }>()
   const { data: groupResponse, isLoading: groupLoading } = useGroup(groupId ?? '')
   const { data: nodesResponse, isLoading: nodesLoading } = useGroupNodes(groupId ?? '')
+  const { data: siteResponse } = useSite(groupId ?? '')
+
+  // If this group is a site, render the SiteDetailPage instead
+  if (siteResponse?.data?.is_site) {
+    return <SiteDetailPage />
+  }
 
   if (groupLoading) {
     return (

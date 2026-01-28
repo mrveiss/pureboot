@@ -12,6 +12,7 @@ export * from './audit'
 export * from './ldap'
 export * from './clone'
 export * from './partition'
+export * from './site'
 
 export type {
   StorageBackendType,

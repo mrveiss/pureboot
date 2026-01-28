@@ -5,6 +5,7 @@ import { useNodeStats, useNodes } from '@/hooks'
 import { NODE_STATE_COLORS, NODE_STATE_LABELS, type NodeState } from '@/types'
 import { cn } from '@/lib/utils'
 import { DhcpSetupBanner } from '@/components/dashboard'
+import { SiteHealthWidget } from '@/components/sites'
 
 function StatCard({
   title,
@@ -124,7 +125,7 @@ export function Dashboard() {
         />
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
         {/* State breakdown */}
         <Card>
           <CardHeader>
@@ -222,6 +223,9 @@ export function Dashboard() {
             )}
           </CardContent>
         </Card>
+
+        {/* Site health */}
+        <SiteHealthWidget />
       </div>
     </div>
   )

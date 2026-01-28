@@ -55,9 +55,10 @@ function NavItem({ to, icon, label, badge }: NavItemProps) {
 
 interface SidebarProps {
   pendingApprovals?: number
+  problemSites?: number
 }
 
-export function Sidebar({ pendingApprovals = 0 }: SidebarProps) {
+export function Sidebar({ pendingApprovals = 0, problemSites = 0 }: SidebarProps) {
   return (
     <aside className="flex h-full w-64 flex-col border-r bg-card">
       <div className="flex h-16 items-center gap-2 border-b px-4">
@@ -68,7 +69,7 @@ export function Sidebar({ pendingApprovals = 0 }: SidebarProps) {
       <nav className="flex-1 space-y-1 p-4">
         <NavItem to="/" icon={<LayoutDashboard className="h-4 w-4" />} label="Dashboard" />
         <NavItem to="/nodes" icon={<Server className="h-4 w-4" />} label="Nodes" />
-        <NavItem to="/groups" icon={<Folders className="h-4 w-4" />} label="Device Groups" />
+        <NavItem to="/groups" icon={<Folders className="h-4 w-4" />} label="Device Groups" badge={problemSites} />
         <NavItem to="/workflows" icon={<Workflow className="h-4 w-4" />} label="Workflows" />
         <NavItem to="/templates" icon={<FileCode className="h-4 w-4" />} label="Templates" />
         <NavItem to="/hypervisors" icon={<Cloud className="h-4 w-4" />} label="Hypervisors" />

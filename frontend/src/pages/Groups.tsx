@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   Plus,
   FolderOpen,
@@ -21,11 +21,19 @@ import {
   Input,
   Label,
   Checkbox,
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
 } from '@/components/ui'
 import { useGroups, useCreateGroup, useUpdateGroup, useDeleteGroup } from '@/hooks'
+import { SitesListPage } from './SitesListPage'
 import type { DeviceGroup } from '@/types'
 
 export function Groups() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab = searchParams.get('tab') ?? 'groups'
+
   const { data: response, isLoading } = useGroups()
   const createGroup = useCreateGroup()
   const updateGroup = useUpdateGroup()
@@ -81,16 +89,38 @@ export function Groups() {
     setEditingGroup(group)
   }
 
+  const handleTabChange = (value: string) => {
+    if (value === 'groups') {
+      searchParams.delete('tab')
+    } else {
+      searchParams.set('tab', value)
+    }
+    setSearchParams(searchParams, { replace: true })
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-3xl font-bold tracking-tight">Device Groups</h2>
-        <Button onClick={() => setIsCreateOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          Create Group
-        </Button>
+        {activeTab === 'groups' && (
+          <Button onClick={() => setIsCreateOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            Create Group
+          </Button>
+        )}
       </div>
 
+      <Tabs value={activeTab} onValueChange={handleTabChange}>
+        <TabsList>
+          <TabsTrigger value="groups">Groups</TabsTrigger>
+          <TabsTrigger value="sites">Sites</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="sites">
+          <SitesListPage />
+        </TabsContent>
+
+        <TabsContent value="groups">
       {isLoading ? (
         <div className="text-muted-foreground">Loading groups...</div>
       ) : groups.length === 0 ? (
@@ -158,6 +188,9 @@ export function Groups() {
           ))}
         </div>
       )}
+
+        </TabsContent>
+      </Tabs>
 
       {/* Create Dialog */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
