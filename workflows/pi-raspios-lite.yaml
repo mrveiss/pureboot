@@ -1,0 +1,57 @@
+# Pi Raspberry Pi OS Lite
+# Deploys Raspberry Pi OS Lite (64-bit) with headless configuration
+#
+# This workflow deploys the official Raspberry Pi OS Lite image and
+# configures it for headless operation with SSH enabled.
+#
+# Features:
+#   - Automatic SSH enablement
+#   - Hostname configuration
+#   - Optional user password setup via userconf.txt
+#   - Partition resize to fill disk
+
+id: pi-raspios-lite
+name: Raspberry Pi OS Lite (64-bit)
+description: Minimal Raspberry Pi OS for headless servers
+version: "1.0"
+arch: aarch64
+install_method: image
+
+# Image URL - update to match your image server
+image_url: "{{ image_url | default('http://pureboot.local/images/raspios-bookworm-arm64-lite.img.xz') }}"
+target_device: "{{ target_device | default('/dev/mmcblk0') }}"
+
+# Boot parameters
+boot_params:
+  resize_rootfs: true
+
+# Post-install configuration
+post_install:
+  - name: Enable SSH
+    enabled: true
+  - name: Set hostname
+    enabled: true
+    hostname: "{{ hostname | default('pi-{{ serial }}') }}"
+  - name: Configure user
+    enabled: "{{ user_password is defined }}"
+    username: "{{ username | default('pi') }}"
+    password: "{{ user_password }}"
+
+# Variables (set when assigning workflow to node)
+variables:
+  hostname: ""
+  username: "pi"
+  user_password: ""
+  ssh_keys: []
+
+# Tags for filtering
+tags:
+  - raspberry-pi-os
+  - raspios
+  - lite
+  - headless
+  - aarch64
+
+# Metadata
+author: PureBoot
+created: "2026-01-28"

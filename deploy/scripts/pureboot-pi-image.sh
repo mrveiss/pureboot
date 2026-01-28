@@ -152,6 +152,145 @@ resize_pi_partitions() {
     log "Partition resize complete"
 }
 
+# =============================================================================
+# Post-Install Configuration
+# =============================================================================
+
+# Find root partition on target device
+find_root_partition() {
+    local device="$1"
+    local part_prefix="${device}"
+
+    # Handle partition naming
+    if is_sd_card "${device}" || [[ "${device}" == /dev/nvme* ]]; then
+        part_prefix="${device}p"
+    fi
+
+    # Try common root partition numbers (2 for Pi, 1 for simple images)
+    for num in 2 1 3; do
+        local part="${part_prefix}${num}"
+        if [[ -b "${part}" ]]; then
+            local fstype
+            fstype=$(blkid -o value -s TYPE "${part}" 2>/dev/null)
+            if [[ "${fstype}" =~ ^(ext4|ext3|btrfs|xfs)$ ]]; then
+                echo "${part}"
+                return 0
+            fi
+        fi
+    done
+
+    return 1
+}
+
+# Detect OS type and configure accordingly
+configure_os() {
+    local mount_point="$1"
+
+    # Detect OS type
+    if [[ -f "${mount_point}/etc/rpi-issue" ]] || \
+       [[ -f "${mount_point}/etc/apt/sources.list.d/raspi.list" ]]; then
+        log "Detected Raspberry Pi OS"
+        if [[ -f /usr/local/bin/pureboot-raspios-config.sh ]]; then
+            source /usr/local/bin/pureboot-raspios-config.sh
+            configure_raspios "${mount_point}" "${PUREBOOT_HOSTNAME:-}"
+        fi
+    elif [[ -d "${mount_point}/etc/cloud" ]]; then
+        log "Detected cloud-init enabled OS (Ubuntu/Debian)"
+        if [[ -f /usr/local/bin/pureboot-cloud-init.sh ]]; then
+            source /usr/local/bin/pureboot-cloud-init.sh
+            configure_cloud_init "${mount_point}" "${PUREBOOT_HOSTNAME:-}" ${PUREBOOT_SSH_KEYS:-}
+        fi
+    else
+        log "Unknown OS type, applying basic configuration"
+    fi
+
+    # Always try to enable SSH
+    if [[ -f /usr/local/bin/pureboot-cloud-init.sh ]]; then
+        source /usr/local/bin/pureboot-cloud-init.sh
+        enable_ssh "${mount_point}"
+    fi
+}
+
+# Run post-install scripts from workflow
+run_post_install() {
+    if [[ -z "${PUREBOOT_POST_SCRIPT}" ]]; then
+        log "No post-install script configured"
+        return 0
+    fi
+
+    log "Running post-install script..."
+
+    # Mount the target filesystem
+    local mount_point="/mnt/target"
+    mkdir -p "${mount_point}"
+
+    # Find and mount root partition
+    local root_part
+    root_part=$(find_root_partition "${PUREBOOT_TARGET}")
+
+    if [[ -z "${root_part}" ]]; then
+        log_warn "Could not find root partition for post-install"
+        return 1
+    fi
+
+    mount "${root_part}" "${mount_point}" || {
+        log_error "Failed to mount root partition"
+        return 1
+    }
+
+    # Download and run script
+    local script_file="/tmp/post-install.sh"
+    if curl -sfL "${PUREBOOT_POST_SCRIPT}" -o "${script_file}"; then
+        chmod +x "${script_file}"
+
+        # Run in chroot if possible
+        if [[ -d "${mount_point}/bin" ]]; then
+            cp "${script_file}" "${mount_point}/tmp/"
+            chroot "${mount_point}" /tmp/post-install.sh || log_warn "Post-install script returned non-zero"
+            rm -f "${mount_point}/tmp/post-install.sh"
+        else
+            "${script_file}" "${mount_point}" || log_warn "Post-install script returned non-zero"
+        fi
+
+        log "Post-install script completed"
+    else
+        log_error "Failed to download post-install script"
+    fi
+
+    umount "${mount_point}"
+    return 0
+}
+
+# Run OS configuration on mounted target
+run_os_config() {
+    log "Configuring deployed OS..."
+
+    # Mount the target filesystem
+    local mount_point="/mnt/target"
+    mkdir -p "${mount_point}"
+
+    # Find and mount root partition
+    local root_part
+    root_part=$(find_root_partition "${PUREBOOT_TARGET}")
+
+    if [[ -z "${root_part}" ]]; then
+        log_warn "Could not find root partition for OS config"
+        return 0
+    fi
+
+    if ! mount "${root_part}" "${mount_point}"; then
+        log_warn "Failed to mount root partition for OS config"
+        return 0
+    fi
+
+    # Configure OS
+    configure_os "${mount_point}"
+
+    # Unmount
+    umount "${mount_point}"
+    log "OS configuration complete"
+}
+
 # Notify controller of completion
 notify_pi_complete() {
     if [[ -n "${PUREBOOT_CALLBACK}" ]]; then
@@ -176,12 +315,15 @@ main() {
     log "  Model: ${PUREBOOT_PI_MODEL:-$(get_pi_model)}"
     log "  Server: ${PUREBOOT_SERVER:-not set}"
     log "  Node ID: ${PUREBOOT_NODE_ID:-not set}"
+    log "  Hostname: ${PUREBOOT_HOSTNAME:-auto}"
     log ""
 
     verify_pi_params
 
     deploy_pi_image
     resize_pi_partitions
+    run_os_config
+    run_post_install
     notify_pi_complete
 
     log ""

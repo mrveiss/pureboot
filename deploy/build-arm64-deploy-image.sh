@@ -96,6 +96,11 @@ cp "${SCRIPT_DIR}/scripts/pureboot-common-arm64.sh" "${ROOTFS_DIR}/usr/local/bin
 cp "${SCRIPT_DIR}/scripts/pureboot-pi-deploy.sh" "${ROOTFS_DIR}/usr/local/bin/"
 cp "${SCRIPT_DIR}/scripts/pureboot-pi-image.sh" "${ROOTFS_DIR}/usr/local/bin/"
 cp "${SCRIPT_DIR}/scripts/pureboot-pi-nfs.sh" "${ROOTFS_DIR}/usr/local/bin/"
+
+# OS configuration helpers
+cp "${SCRIPT_DIR}/scripts/pureboot-cloud-init.sh" "${ROOTFS_DIR}/usr/local/bin/"
+cp "${SCRIPT_DIR}/scripts/pureboot-raspios-config.sh" "${ROOTFS_DIR}/usr/local/bin/"
+
 chmod +x "${ROOTFS_DIR}/usr/local/bin/"*.sh
 
 # Init script
