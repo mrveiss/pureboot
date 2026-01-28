@@ -13,7 +13,11 @@ class Base(DeclarativeBase):
 
 
 class DeviceGroup(Base):
-    """Device group for organizing nodes with shared settings."""
+    """Device group for organizing nodes with shared settings.
+
+    Can also represent a site when is_site=True, which adds agent
+    connection and autonomy configuration for multi-site deployments.
+    """
 
     __tablename__ = "device_groups"
 
@@ -33,6 +37,44 @@ class DeviceGroup(Base):
     # Default settings for nodes in this group (nullable for inheritance)
     default_workflow_id: Mapped[str | None] = mapped_column(String(36))
     auto_provision: Mapped[bool | None] = mapped_column(default=None)
+
+    # Site-specific fields (null for regular groups)
+    is_site: Mapped[bool] = mapped_column(default=False)
+
+    # Site agent connection (only when is_site=True)
+    agent_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    agent_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    agent_status: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )  # online, offline, degraded
+    agent_last_seen: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    # Site autonomy settings
+    autonomy_level: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )  # readonly, limited, full
+    conflict_resolution: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )  # central_wins, last_write, site_wins, manual
+
+    # Content caching policy
+    cache_policy: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )  # minimal, assigned, mirror, pattern
+    cache_patterns_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cache_max_size_gb: Mapped[int | None] = mapped_column(nullable=True)
+    cache_retention_days: Mapped[int | None] = mapped_column(nullable=True)
+
+    # Network discovery config
+    discovery_method: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )  # dhcp, dns, anycast, fallback
+    discovery_config_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Migration policy
+    migration_policy: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )  # manual, auto_accept, auto_release, bidirectional
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(default=func.now())
@@ -85,7 +127,16 @@ class Node(Base):
 
     # Relationships
     group_id: Mapped[str | None] = mapped_column(ForeignKey("device_groups.id"))
-    group: Mapped[DeviceGroup | None] = relationship(back_populates="nodes")
+    group: Mapped[DeviceGroup | None] = relationship(
+        back_populates="nodes", foreign_keys=[group_id]
+    )
+
+    # Physical site where node boots from (may differ from logical group)
+    home_site_id: Mapped[str | None] = mapped_column(
+        ForeignKey("device_groups.id"), nullable=True
+    )
+    home_site: Mapped["DeviceGroup | None"] = relationship(foreign_keys=[home_site_id])
+
     tags: Mapped[list["NodeTag"]] = relationship(
         back_populates="node", cascade="all, delete-orphan"
     )
@@ -593,6 +644,105 @@ class StepResult(Base):
     # Relationships
     execution: Mapped["WorkflowExecution"] = relationship(back_populates="step_results")
     step: Mapped["WorkflowStep"] = relationship()
+
+
+# =============================================================================
+# Multi-Site Sync Models
+# =============================================================================
+
+
+class SyncState(Base):
+    """Tracks sync state per entity for multi-site synchronization."""
+
+    __tablename__ = "sync_states"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    entity_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # node, workflow, template
+    entity_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    site_id: Mapped[str] = mapped_column(
+        ForeignKey("device_groups.id"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(default=1)
+    last_modified: Mapped[datetime] = mapped_column(default=func.now())
+    last_modified_by: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # site_id or "central"
+    checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Relationships
+    site: Mapped["DeviceGroup"] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint(
+            "entity_type", "entity_id", "site_id", name="uq_sync_state_entity_site"
+        ),
+        Index("ix_sync_state_entity", "entity_type", "entity_id"),
+    )
+
+
+class SyncConflict(Base):
+    """Conflicts pending manual resolution during multi-site sync."""
+
+    __tablename__ = "sync_conflicts"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    entity_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    site_id: Mapped[str] = mapped_column(
+        ForeignKey("device_groups.id"), nullable=False
+    )
+    central_state_json: Mapped[str] = mapped_column(Text, nullable=False)
+    site_state_json: Mapped[str] = mapped_column(Text, nullable=False)
+    detected_at: Mapped[datetime] = mapped_column(default=func.now())
+    resolved_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    resolution: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )  # accepted_central, accepted_site, merged
+
+    # Relationships
+    site: Mapped["DeviceGroup"] = relationship()
+
+
+class MigrationClaim(Base):
+    """Tracks node migration between sites."""
+
+    __tablename__ = "migration_claims"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_site_id: Mapped[str] = mapped_column(
+        ForeignKey("device_groups.id"), nullable=False
+    )
+    target_site_id: Mapped[str] = mapped_column(
+        ForeignKey("device_groups.id"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), default="pending"
+    )  # pending, approved, rejected, expired
+    auto_approve_eligible: Mapped[bool] = mapped_column(default=False)
+    policy_matched: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    approval_id: Mapped[str | None] = mapped_column(
+        ForeignKey("approvals.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    resolved_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(nullable=False)
+
+    # Relationships
+    node: Mapped["Node"] = relationship()
+    source_site: Mapped["DeviceGroup"] = relationship(foreign_keys=[source_site_id])
+    target_site: Mapped["DeviceGroup"] = relationship(foreign_keys=[target_site_id])
+    approval: Mapped["Approval | None"] = relationship()
 
 
 class Approval(Base):

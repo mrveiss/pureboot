@@ -11,6 +11,12 @@ from src.api.schemas import (
     DeviceGroupUpdate,
     DeviceGroupResponse,
     NodeReport,
+    SiteCreate,
+    SiteUpdate,
+    SiteResponse,
+    SiteHealthResponse,
+    SiteSyncRequest,
+    SiteSyncResponse,
 )
 
 
@@ -219,3 +225,329 @@ class TestPiNodeSchemas:
         """pi_model is optional."""
         node = NodeCreate(mac_address="dc:a6:32:12:34:56")
         assert node.pi_model is None
+
+
+class TestSiteCreate:
+    """Test SiteCreate schema."""
+
+    def test_valid_site_create(self):
+        """Create site with valid data."""
+        from src.api.schemas import SiteCreate
+
+        site = SiteCreate(name="datacenter-west")
+        assert site.name == "datacenter-west"
+        assert site.autonomy_level == "readonly"
+        assert site.conflict_resolution == "central_wins"
+        assert site.cache_policy == "minimal"
+        assert site.discovery_method == "dhcp"
+        assert site.migration_policy == "manual"
+        assert site.cache_retention_days == 30
+
+    def test_site_create_with_all_fields(self):
+        """Create site with all fields specified."""
+        from src.api.schemas import SiteCreate
+
+        site = SiteCreate(
+            name="branch-office-nyc",
+            description="New York branch office",
+            parent_id="parent-site-uuid",
+            agent_url="https://site-agent.local:8443",
+            autonomy_level="full",
+            conflict_resolution="last_write",
+            cache_policy="mirror",
+            cache_max_size_gb=100,
+            cache_retention_days=60,
+            discovery_method="dns",
+            migration_policy="bidirectional",
+        )
+        assert site.name == "branch-office-nyc"
+        assert site.autonomy_level == "full"
+        assert site.cache_max_size_gb == 100
+
+    def test_invalid_autonomy_level_rejected(self):
+        """Invalid autonomy level rejected."""
+        from src.api.schemas import SiteCreate
+
+        with pytest.raises(ValidationError) as exc_info:
+            SiteCreate(name="test-site", autonomy_level="invalid")
+        assert "Invalid autonomy_level" in str(exc_info.value)
+
+    def test_invalid_conflict_resolution_rejected(self):
+        """Invalid conflict resolution rejected."""
+        from src.api.schemas import SiteCreate
+
+        with pytest.raises(ValidationError) as exc_info:
+            SiteCreate(name="test-site", conflict_resolution="invalid")
+        assert "Invalid conflict_resolution" in str(exc_info.value)
+
+    def test_invalid_cache_policy_rejected(self):
+        """Invalid cache policy rejected."""
+        from src.api.schemas import SiteCreate
+
+        with pytest.raises(ValidationError) as exc_info:
+            SiteCreate(name="test-site", cache_policy="invalid")
+        assert "Invalid cache_policy" in str(exc_info.value)
+
+    def test_invalid_discovery_method_rejected(self):
+        """Invalid discovery method rejected."""
+        from src.api.schemas import SiteCreate
+
+        with pytest.raises(ValidationError) as exc_info:
+            SiteCreate(name="test-site", discovery_method="invalid")
+        assert "Invalid discovery_method" in str(exc_info.value)
+
+    def test_invalid_migration_policy_rejected(self):
+        """Invalid migration policy rejected."""
+        from src.api.schemas import SiteCreate
+
+        with pytest.raises(ValidationError) as exc_info:
+            SiteCreate(name="test-site", migration_policy="invalid")
+        assert "Invalid migration_policy" in str(exc_info.value)
+
+    def test_empty_name_rejected(self):
+        """Empty name rejected."""
+        from src.api.schemas import SiteCreate
+
+        with pytest.raises(ValidationError):
+            SiteCreate(name="")
+
+    def test_all_autonomy_levels_valid(self):
+        """All valid autonomy levels accepted."""
+        from src.api.schemas import SiteCreate
+
+        for level in ["readonly", "limited", "full"]:
+            site = SiteCreate(name="test-site", autonomy_level=level)
+            assert site.autonomy_level == level
+
+    def test_all_conflict_resolutions_valid(self):
+        """All valid conflict resolutions accepted."""
+        from src.api.schemas import SiteCreate
+
+        for resolution in ["central_wins", "last_write", "site_wins", "manual"]:
+            site = SiteCreate(name="test-site", conflict_resolution=resolution)
+            assert site.conflict_resolution == resolution
+
+    def test_all_cache_policies_valid(self):
+        """All valid cache policies accepted."""
+        from src.api.schemas import SiteCreate
+
+        for policy in ["minimal", "assigned", "mirror", "pattern"]:
+            site = SiteCreate(name="test-site", cache_policy=policy)
+            assert site.cache_policy == policy
+
+    def test_all_discovery_methods_valid(self):
+        """All valid discovery methods accepted."""
+        from src.api.schemas import SiteCreate
+
+        for method in ["dhcp", "dns", "anycast", "fallback"]:
+            site = SiteCreate(name="test-site", discovery_method=method)
+            assert site.discovery_method == method
+
+    def test_all_migration_policies_valid(self):
+        """All valid migration policies accepted."""
+        from src.api.schemas import SiteCreate
+
+        for policy in ["manual", "auto_accept", "auto_release", "bidirectional"]:
+            site = SiteCreate(name="test-site", migration_policy=policy)
+            assert site.migration_policy == policy
+
+
+class TestSiteUpdate:
+    """Test SiteUpdate schema."""
+
+    def test_all_fields_optional(self):
+        """All fields are optional for update."""
+        from src.api.schemas import SiteUpdate
+
+        update = SiteUpdate()
+        assert update.name is None
+        assert update.autonomy_level is None
+
+    def test_partial_update(self):
+        """Can update just some fields."""
+        from src.api.schemas import SiteUpdate
+
+        update = SiteUpdate(autonomy_level="full", cache_max_size_gb=200)
+        assert update.autonomy_level == "full"
+        assert update.cache_max_size_gb == 200
+        assert update.name is None
+
+    def test_invalid_autonomy_level_rejected(self):
+        """Invalid autonomy level rejected in update."""
+        from src.api.schemas import SiteUpdate
+
+        with pytest.raises(ValidationError) as exc_info:
+            SiteUpdate(autonomy_level="invalid")
+        assert "Invalid autonomy_level" in str(exc_info.value)
+
+    def test_invalid_conflict_resolution_rejected(self):
+        """Invalid conflict resolution rejected in update."""
+        from src.api.schemas import SiteUpdate
+
+        with pytest.raises(ValidationError) as exc_info:
+            SiteUpdate(conflict_resolution="invalid")
+        assert "Invalid conflict_resolution" in str(exc_info.value)
+
+    def test_none_values_allowed(self):
+        """None values are allowed (they mean 'no change')."""
+        from src.api.schemas import SiteUpdate
+
+        update = SiteUpdate(autonomy_level=None, cache_policy=None)
+        assert update.autonomy_level is None
+        assert update.cache_policy is None
+
+
+class TestSiteResponse:
+    """Test SiteResponse schema."""
+
+    def test_site_response_includes_site_fields(self):
+        """SiteResponse includes site-specific fields."""
+        from datetime import datetime
+        from src.api.schemas import SiteResponse
+
+        class MockSite:
+            id = "site-uuid"
+            name = "datacenter-west"
+            description = "Western datacenter"
+            parent_id = None
+            path = "/datacenter-west"
+            depth = 0
+            default_workflow_id = None
+            auto_provision = None
+            created_at = datetime(2026, 1, 26)
+            updated_at = datetime(2026, 1, 26)
+            # Site-specific fields
+            is_site = True
+            agent_url = "https://site-agent.local:8443"
+            agent_status = "online"
+            agent_last_seen = datetime(2026, 1, 26, 12, 0, 0)
+            autonomy_level = "limited"
+            conflict_resolution = "central_wins"
+            cache_policy = "assigned"
+            cache_patterns_json = None
+            cache_max_size_gb = 100
+            cache_retention_days = 30
+            discovery_method = "dhcp"
+            discovery_config_json = None
+            migration_policy = "manual"
+
+        resp = SiteResponse.from_site(MockSite(), node_count=10, children_count=2)
+
+        assert resp.id == "site-uuid"
+        assert resp.name == "datacenter-west"
+        assert resp.is_site is True
+        assert resp.agent_url == "https://site-agent.local:8443"
+        assert resp.agent_status == "online"
+        assert resp.autonomy_level == "limited"
+        assert resp.cache_policy == "assigned"
+        assert resp.cache_max_size_gb == 100
+        assert resp.node_count == 10
+        assert resp.children_count == 2
+
+    def test_site_response_inherits_from_device_group_response(self):
+        """SiteResponse inherits DeviceGroupResponse fields."""
+        from src.api.schemas import SiteResponse, DeviceGroupResponse
+
+        assert issubclass(SiteResponse, DeviceGroupResponse)
+
+    def test_site_response_with_null_agent_status(self):
+        """SiteResponse handles null agent status (site not yet connected)."""
+        from datetime import datetime
+        from src.api.schemas import SiteResponse
+
+        class MockSite:
+            id = "site-uuid"
+            name = "new-site"
+            description = None
+            parent_id = None
+            path = "/new-site"
+            depth = 0
+            default_workflow_id = None
+            auto_provision = None
+            created_at = datetime(2026, 1, 26)
+            updated_at = datetime(2026, 1, 26)
+            is_site = True
+            agent_url = None
+            agent_status = None
+            agent_last_seen = None
+            autonomy_level = "readonly"
+            conflict_resolution = "central_wins"
+            cache_policy = "minimal"
+            cache_patterns_json = None
+            cache_max_size_gb = None
+            cache_retention_days = 30
+            discovery_method = "dhcp"
+            discovery_config_json = None
+            migration_policy = "manual"
+
+        resp = SiteResponse.from_site(MockSite())
+
+        assert resp.agent_url is None
+        assert resp.agent_status is None
+        assert resp.agent_last_seen is None
+
+
+class TestSiteHealthResponse:
+    """Test SiteHealthResponse schema."""
+
+    def test_site_health_response(self):
+        """SiteHealthResponse accepts all fields."""
+        from datetime import datetime
+        from src.api.schemas import SiteHealthResponse
+
+        health = SiteHealthResponse(
+            site_id="site-uuid",
+            agent_status="online",
+            agent_last_seen=datetime(2026, 1, 26, 12, 0, 0),
+            pending_sync_items=5,
+            conflicts_pending=2,
+            nodes_count=10,
+            cache_used_gb=45.5,
+            cache_max_gb=100,
+        )
+        assert health.site_id == "site-uuid"
+        assert health.agent_status == "online"
+        assert health.pending_sync_items == 5
+        assert health.conflicts_pending == 2
+
+    def test_site_health_response_defaults(self):
+        """SiteHealthResponse has sensible defaults."""
+        from src.api.schemas import SiteHealthResponse
+
+        health = SiteHealthResponse(site_id="site-uuid", agent_status=None)
+        assert health.pending_sync_items == 0
+        assert health.conflicts_pending == 0
+        assert health.nodes_count == 0
+        assert health.cache_used_gb is None
+
+
+class TestSiteSyncSchemas:
+    """Test site sync request/response schemas."""
+
+    def test_site_sync_request_defaults(self):
+        """SiteSyncRequest has sensible defaults."""
+        from src.api.schemas import SiteSyncRequest
+
+        req = SiteSyncRequest()
+        assert req.full_sync is False
+        assert req.entity_types is None
+
+    def test_site_sync_request_with_options(self):
+        """SiteSyncRequest accepts sync options."""
+        from src.api.schemas import SiteSyncRequest
+
+        req = SiteSyncRequest(full_sync=True, entity_types=["node", "workflow"])
+        assert req.full_sync is True
+        assert req.entity_types == ["node", "workflow"]
+
+    def test_site_sync_response(self):
+        """SiteSyncResponse contains sync job info."""
+        from src.api.schemas import SiteSyncResponse
+
+        resp = SiteSyncResponse(
+            sync_id="sync-uuid",
+            status="queued",
+            message="Sync queued successfully",
+        )
+        assert resp.sync_id == "sync-uuid"
+        assert resp.status == "queued"

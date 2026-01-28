@@ -1,0 +1,74 @@
+# PureBoot Site Agent Dockerfile
+# Lightweight image for remote site agents
+FROM python:3.11-slim-bookworm AS builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies (subset needed for agent)
+COPY requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+
+# Production image
+FROM python:3.11-slim-bookworm
+
+WORKDIR /app
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libcap2-bin \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Python packages from builder
+COPY --from=builder /root/.local /root/.local
+ENV PATH=/root/.local/bin:$PATH
+
+# Copy only agent-related code
+COPY src/agent/ ./src/agent/
+COPY src/config/ ./src/config/
+COPY src/pxe/tftp_server.py ./src/pxe/tftp_server.py
+COPY src/pxe/__init__.py ./src/pxe/__init__.py
+COPY src/__init__.py ./src/__init__.py
+
+# Create directories for agent data and cache
+RUN mkdir -p /var/lib/pureboot-agent/cache/tftp /var/lib/pureboot-agent/cache/http
+
+# Create non-root user
+RUN useradd -m -r pureboot && \
+    chown -R pureboot:pureboot /var/lib/pureboot-agent
+
+# Environment variables for agent mode
+ENV PUREBOOT_HOST=0.0.0.0 \
+    PUREBOOT_PORT=8080 \
+    PUREBOOT_AGENT__MODE=agent \
+    PUREBOOT_AGENT__DATA_DIR=/var/lib/pureboot-agent \
+    PUREBOOT_AGENT__CACHE_DIR=/var/lib/pureboot-agent/cache \
+    PUREBOOT_AGENT__CACHE_MAX_SIZE_GB=50 \
+    PUREBOOT_TFTP__ROOT=/var/lib/pureboot-agent/cache/tftp \
+    PUREBOOT_TFTP__ENABLED=true \
+    PYTHONUNBUFFERED=1
+
+# Required environment variables (must be set at runtime):
+# PUREBOOT_AGENT__SITE_ID - Site ID for this agent
+# PUREBOOT_AGENT__CENTRAL_URL - URL of central controller
+# PUREBOOT_AGENT__REGISTRATION_TOKEN - Token for initial registration
+
+# Expose ports
+# 8080 - HTTP boot service
+# 69 - TFTP (UDP)
+EXPOSE 8080 69/udp
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"
+
+# Run as pureboot user
+USER pureboot
+
+# Run the site agent
+CMD ["python", "-m", "src.agent.main"]

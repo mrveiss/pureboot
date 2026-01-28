@@ -349,6 +349,322 @@ class DeviceGroupResponse(BaseModel):
         )
 
 
+# ============== Site Schemas ==============
+
+# Valid values for site-specific enum fields
+AUTONOMY_LEVELS = {"readonly", "limited", "full"}
+CONFLICT_RESOLUTIONS = {"central_wins", "last_write", "site_wins", "manual"}
+CACHE_POLICIES = {"minimal", "assigned", "mirror", "pattern"}
+DISCOVERY_METHODS = {"dhcp", "dns", "anycast", "fallback"}
+MIGRATION_POLICIES = {"manual", "auto_accept", "auto_release", "bidirectional"}
+
+
+class SiteCreate(BaseModel):
+    """Schema for creating a site (is_site=True DeviceGroup).
+
+    Sites are special DeviceGroups that represent physical locations
+    with their own site agents for local caching and offline operation.
+
+    Example:
+        ```json
+        {
+            "name": "datacenter-west",
+            "description": "Western datacenter site",
+            "parent_id": null,
+            "agent_url": "https://site-west.example.com:8443",
+            "autonomy_level": "limited",
+            "cache_policy": "assigned"
+        }
+        ```
+    """
+
+    name: str = Field(
+        ...,
+        description="Site name",
+        examples=["datacenter-west", "branch-office-nyc"],
+    )
+    description: str | None = Field(
+        None,
+        description="Site description",
+    )
+    parent_id: str | None = Field(
+        None,
+        description="Parent site ID (for nested site hierarchy)",
+    )
+
+    # Site agent connection
+    agent_url: str | None = Field(
+        None,
+        description="URL of the site agent",
+        examples=["https://site-agent.local:8443"],
+    )
+
+    # Site autonomy settings
+    autonomy_level: str = Field(
+        "readonly",
+        description="Site autonomy level: readonly, limited, or full",
+    )
+    conflict_resolution: str = Field(
+        "central_wins",
+        description="Conflict resolution strategy: central_wins, last_write, site_wins, manual",
+    )
+
+    # Content caching policy
+    cache_policy: str = Field(
+        "minimal",
+        description="Cache policy: minimal, assigned, mirror, pattern",
+    )
+    cache_patterns_json: str | None = Field(
+        None,
+        description="JSON patterns for pattern-based caching",
+    )
+    cache_max_size_gb: int | None = Field(
+        None,
+        description="Maximum cache size in GB",
+        ge=1,
+    )
+    cache_retention_days: int = Field(
+        30,
+        description="Cache retention period in days",
+        ge=1,
+    )
+
+    # Network discovery config
+    discovery_method: str = Field(
+        "dhcp",
+        description="How nodes discover this site: dhcp, dns, anycast, fallback",
+    )
+    discovery_config_json: str | None = Field(
+        None,
+        description="JSON configuration for discovery method",
+    )
+
+    # Migration policy
+    migration_policy: str = Field(
+        "manual",
+        description="Node migration policy: manual, auto_accept, auto_release, bidirectional",
+    )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        """Validate site name."""
+        if not v or len(v) > 100:
+            raise ValueError("Name must be 1-100 characters")
+        return v
+
+    @field_validator("autonomy_level")
+    @classmethod
+    def validate_autonomy_level(cls, v: str) -> str:
+        """Validate autonomy level."""
+        if v not in AUTONOMY_LEVELS:
+            raise ValueError(f"Invalid autonomy_level: {v}. Must be one of {AUTONOMY_LEVELS}")
+        return v
+
+    @field_validator("conflict_resolution")
+    @classmethod
+    def validate_conflict_resolution(cls, v: str) -> str:
+        """Validate conflict resolution strategy."""
+        if v not in CONFLICT_RESOLUTIONS:
+            raise ValueError(f"Invalid conflict_resolution: {v}. Must be one of {CONFLICT_RESOLUTIONS}")
+        return v
+
+    @field_validator("cache_policy")
+    @classmethod
+    def validate_cache_policy(cls, v: str) -> str:
+        """Validate cache policy."""
+        if v not in CACHE_POLICIES:
+            raise ValueError(f"Invalid cache_policy: {v}. Must be one of {CACHE_POLICIES}")
+        return v
+
+    @field_validator("discovery_method")
+    @classmethod
+    def validate_discovery_method(cls, v: str) -> str:
+        """Validate discovery method."""
+        if v not in DISCOVERY_METHODS:
+            raise ValueError(f"Invalid discovery_method: {v}. Must be one of {DISCOVERY_METHODS}")
+        return v
+
+    @field_validator("migration_policy")
+    @classmethod
+    def validate_migration_policy(cls, v: str) -> str:
+        """Validate migration policy."""
+        if v not in MIGRATION_POLICIES:
+            raise ValueError(f"Invalid migration_policy: {v}. Must be one of {MIGRATION_POLICIES}")
+        return v
+
+
+class SiteUpdate(BaseModel):
+    """Schema for updating a site.
+
+    All fields are optional. Only provided fields will be updated.
+    """
+
+    name: str | None = None
+    description: str | None = None
+    parent_id: str | None = None
+    agent_url: str | None = None
+    autonomy_level: str | None = None
+    conflict_resolution: str | None = None
+    cache_policy: str | None = None
+    cache_patterns_json: str | None = None
+    cache_max_size_gb: int | None = Field(None, ge=1)
+    cache_retention_days: int | None = Field(None, ge=1)
+    discovery_method: str | None = None
+    discovery_config_json: str | None = None
+    migration_policy: str | None = None
+
+    @field_validator("autonomy_level")
+    @classmethod
+    def validate_autonomy_level(cls, v: str | None) -> str | None:
+        """Validate autonomy level if provided."""
+        if v is not None and v not in AUTONOMY_LEVELS:
+            raise ValueError(f"Invalid autonomy_level: {v}. Must be one of {AUTONOMY_LEVELS}")
+        return v
+
+    @field_validator("conflict_resolution")
+    @classmethod
+    def validate_conflict_resolution(cls, v: str | None) -> str | None:
+        """Validate conflict resolution if provided."""
+        if v is not None and v not in CONFLICT_RESOLUTIONS:
+            raise ValueError(f"Invalid conflict_resolution: {v}. Must be one of {CONFLICT_RESOLUTIONS}")
+        return v
+
+    @field_validator("cache_policy")
+    @classmethod
+    def validate_cache_policy(cls, v: str | None) -> str | None:
+        """Validate cache policy if provided."""
+        if v is not None and v not in CACHE_POLICIES:
+            raise ValueError(f"Invalid cache_policy: {v}. Must be one of {CACHE_POLICIES}")
+        return v
+
+    @field_validator("discovery_method")
+    @classmethod
+    def validate_discovery_method(cls, v: str | None) -> str | None:
+        """Validate discovery method if provided."""
+        if v is not None and v not in DISCOVERY_METHODS:
+            raise ValueError(f"Invalid discovery_method: {v}. Must be one of {DISCOVERY_METHODS}")
+        return v
+
+    @field_validator("migration_policy")
+    @classmethod
+    def validate_migration_policy(cls, v: str | None) -> str | None:
+        """Validate migration policy if provided."""
+        if v is not None and v not in MIGRATION_POLICIES:
+            raise ValueError(f"Invalid migration_policy: {v}. Must be one of {MIGRATION_POLICIES}")
+        return v
+
+
+class SiteResponse(DeviceGroupResponse):
+    """Extended response schema for sites.
+
+    Includes all DeviceGroupResponse fields plus site-specific fields.
+    """
+
+    is_site: bool = True
+
+    # Site agent status
+    agent_url: str | None = None
+    agent_status: str | None = None  # online, offline, degraded
+    agent_last_seen: datetime | None = None
+
+    # Site autonomy settings
+    autonomy_level: str | None = None
+    conflict_resolution: str | None = None
+
+    # Content caching policy
+    cache_policy: str | None = None
+    cache_patterns_json: str | None = None
+    cache_max_size_gb: int | None = None
+    cache_retention_days: int | None = None
+
+    # Network discovery config
+    discovery_method: str | None = None
+    discovery_config_json: str | None = None
+
+    # Migration policy
+    migration_policy: str | None = None
+
+    @classmethod
+    def from_site(
+        cls,
+        site,
+        node_count: int = 0,
+        children_count: int = 0,
+        effective_workflow_id: str | None = None,
+        effective_auto_provision: bool = False,
+    ) -> "SiteResponse":
+        """Create response from DeviceGroup model with is_site=True."""
+        return cls(
+            id=site.id,
+            name=site.name,
+            description=site.description,
+            parent_id=site.parent_id,
+            path=site.path,
+            depth=site.depth,
+            children_count=children_count,
+            default_workflow_id=site.default_workflow_id,
+            auto_provision=site.auto_provision,
+            effective_workflow_id=effective_workflow_id
+            if effective_workflow_id
+            else site.default_workflow_id,
+            effective_auto_provision=effective_auto_provision
+            if site.auto_provision is None
+            else site.auto_provision,
+            node_count=node_count,
+            created_at=site.created_at,
+            updated_at=site.updated_at,
+            # Site-specific fields
+            is_site=site.is_site,
+            agent_url=site.agent_url,
+            agent_status=site.agent_status,
+            agent_last_seen=site.agent_last_seen,
+            autonomy_level=site.autonomy_level,
+            conflict_resolution=site.conflict_resolution,
+            cache_policy=site.cache_policy,
+            cache_patterns_json=site.cache_patterns_json,
+            cache_max_size_gb=site.cache_max_size_gb,
+            cache_retention_days=site.cache_retention_days,
+            discovery_method=site.discovery_method,
+            discovery_config_json=site.discovery_config_json,
+            migration_policy=site.migration_policy,
+        )
+
+
+class SiteHealthResponse(BaseModel):
+    """Response schema for site health status."""
+
+    site_id: str
+    agent_status: str | None  # online, offline, degraded
+    agent_last_seen: datetime | None
+    pending_sync_items: int = 0
+    conflicts_pending: int = 0
+    nodes_count: int = 0
+    cache_used_gb: float | None = None
+    cache_max_gb: int | None = None
+
+
+class SiteSyncRequest(BaseModel):
+    """Request to trigger manual sync for a site."""
+
+    full_sync: bool = Field(
+        False,
+        description="Whether to perform a full sync (vs incremental)",
+    )
+    entity_types: list[str] | None = Field(
+        None,
+        description="Specific entity types to sync (e.g., ['node', 'workflow'])",
+    )
+
+
+class SiteSyncResponse(BaseModel):
+    """Response for sync trigger request."""
+
+    sync_id: str
+    status: str  # queued, started
+    message: str
+
+
 # ============== Report Schemas ==============
 
 
@@ -1122,31 +1438,6 @@ class BulkChangeStateResult(BaseModel):
     errors: list[BulkChangeStateError] = []
 
 
-# ============== Workflow Schemas ==============
-
-
-class WorkflowResponse(BaseModel):
-    """Workflow definition for OS installation."""
-
-    id: str
-    name: str
-    description: str = ""
-    kernel_path: str = ""
-    initrd_path: str = ""
-    cmdline: str = ""
-    architecture: str = "x86_64"
-    boot_mode: str = "bios"
-    install_method: str = "kernel"
-    boot_params: dict[str, str] = {}
-
-
-class WorkflowListResponse(BaseModel):
-    """Response for workflow listing."""
-
-    data: list[WorkflowResponse]
-    total: int
-
-
 # ============== Clone Session Schemas ==============
 
 
@@ -1446,3 +1737,91 @@ class PartitionOperationResponse(BaseModel):
             created_at=op.created_at,
             executed_at=op.executed_at,
         )
+
+
+# ============== Site Agent Schemas ==============
+
+
+class AgentRegistration(BaseModel):
+    """Schema for site agent registration with central controller."""
+
+    site_id: str = Field(..., description="Site ID this agent belongs to")
+    token: str = Field(..., description="Registration token")
+    agent_url: str = Field(..., description="URL where agent can be reached")
+    agent_version: str = Field(..., description="Agent software version")
+    capabilities: list[str] = Field(
+        default_factory=list,
+        description="Agent capabilities (e.g., ['tftp', 'http', 'proxy'])",
+    )
+
+
+class AgentConfig(BaseModel):
+    """Configuration returned to agent after registration."""
+
+    site_id: str
+    site_name: str
+    autonomy_level: str | None
+    cache_policy: str | None
+    cache_max_size_gb: int | None
+    cache_retention_days: int | None
+    heartbeat_interval: int = 60
+    sync_enabled: bool = True
+
+
+class AgentRegistrationResponse(BaseModel):
+    """Response for successful agent registration."""
+
+    success: bool = True
+    message: str
+    config: AgentConfig
+
+
+class AgentHeartbeat(BaseModel):
+    """Schema for agent heartbeat to central controller."""
+
+    site_id: str = Field(..., description="Site ID")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    agent_version: str = Field(..., description="Agent software version")
+    uptime_seconds: int = Field(..., ge=0)
+    services: dict[str, str] = Field(
+        ...,
+        description="Service status (e.g., {'tftp': 'ok', 'http': 'ok'})",
+    )
+    nodes_seen_last_hour: int = 0
+    active_boots: int = 0
+    cache_hit_rate: float = Field(0.0, ge=0.0, le=1.0)
+    disk_usage_percent: float = Field(0.0, ge=0.0, le=100.0)
+    pending_sync_items: int = 0
+    last_sync_at: datetime | None = None
+    conflicts_pending: int = 0
+
+
+class HeartbeatCommand(BaseModel):
+    """Command sent to agent via heartbeat response."""
+
+    command: str  # sync, reload_config, cache_evict
+    params: dict = Field(default_factory=dict)
+
+
+class HeartbeatResponse(BaseModel):
+    """Response to agent heartbeat."""
+
+    acknowledged: bool = True
+    server_time: datetime = Field(default_factory=datetime.utcnow)
+    commands: list[HeartbeatCommand] = Field(default_factory=list)
+
+
+class AgentStatusResponse(BaseModel):
+    """Response for agent status query."""
+
+    site_id: str
+    site_name: str
+    agent_url: str | None
+    agent_status: str | None  # online, degraded, offline
+    agent_last_seen: datetime | None
+    agent_version: str | None
+    uptime_seconds: int | None
+    services: dict[str, str] | None
+    nodes_count: int = 0
+    cache_hit_rate: float | None
+    disk_usage_percent: float | None

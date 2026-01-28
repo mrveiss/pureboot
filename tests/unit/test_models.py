@@ -14,6 +14,10 @@ from src.db.models import (
     WorkflowStep,
     WorkflowExecution,
     StepResult,
+    SyncState,
+    SyncConflict,
+    MigrationClaim,
+    Approval,
 )
 
 
@@ -98,6 +102,39 @@ class TestNodeModel:
         session.commit()
 
         assert node.pi_model is None
+
+    def test_node_has_home_site(self, session):
+        """Node can have a home site (where it physically boots from)."""
+        site = DeviceGroup(name="us-east", is_site=True)
+        session.add(site)
+        session.flush()
+
+        node = Node(mac_address="00:11:22:33:44:55", home_site_id=site.id)
+        session.add(node)
+        session.commit()
+
+        assert node.home_site_id == site.id
+        assert node.home_site.name == "us-east"
+
+    def test_home_site_can_differ_from_group(self, session):
+        """home_site_id (physical) can differ from group_id (logical)."""
+        site = DeviceGroup(name="us-east", is_site=True)
+        group = DeviceGroup(name="webservers")
+        session.add_all([site, group])
+        session.flush()
+
+        node = Node(
+            mac_address="00:11:22:33:44:55",
+            group_id=group.id,
+            home_site_id=site.id,
+        )
+        session.add(node)
+        session.commit()
+
+        assert node.group_id == group.id  # Logical group
+        assert node.home_site_id == site.id  # Physical site
+        assert node.group.name == "webservers"
+        assert node.home_site.name == "us-east"
 
 
 class TestDeviceGroupModel:
@@ -216,6 +253,267 @@ class TestDeviceGroupHierarchy:
         session.commit()
 
         assert group.auto_provision is None
+
+
+class TestDeviceGroupSite:
+    """Test DeviceGroup site-specific features."""
+
+    def test_create_site_group(self, session):
+        """Create a site (DeviceGroup with is_site=True)."""
+        site = DeviceGroup(
+            name="us-east",
+            description="US East datacenter",
+            is_site=True,
+            agent_url="https://agent.us-east.local:8443",
+            autonomy_level="limited",
+            conflict_resolution="central_wins",
+            cache_policy="minimal",
+            cache_retention_days=30,
+            discovery_method="dhcp",
+            migration_policy="manual",
+        )
+        session.add(site)
+        session.commit()
+
+        assert site.id is not None
+        assert site.is_site is True
+        assert site.agent_url == "https://agent.us-east.local:8443"
+        assert site.autonomy_level == "limited"
+        assert site.conflict_resolution == "central_wins"
+
+    def test_site_fields_nullable_for_regular_groups(self, session):
+        """Regular groups have null site fields."""
+        group = DeviceGroup(name="webservers")
+        session.add(group)
+        session.commit()
+
+        assert group.is_site is False
+        assert group.agent_url is None
+        assert group.autonomy_level is None
+        assert group.agent_status is None
+
+    def test_site_default_values(self, session):
+        """Site has correct default values."""
+        site = DeviceGroup(name="site1", is_site=True)
+        session.add(site)
+        session.commit()
+
+        assert site.is_site is True
+        assert site.agent_status is None  # Not connected yet
+        assert site.agent_last_seen is None
+        assert site.cache_max_size_gb is None  # No limit by default
+
+    def test_site_agent_status_tracking(self, session):
+        """Site can track agent connection status."""
+        from datetime import datetime
+
+        site = DeviceGroup(
+            name="site1",
+            is_site=True,
+            agent_status="online",
+            agent_last_seen=datetime.utcnow(),
+        )
+        session.add(site)
+        session.commit()
+
+        assert site.agent_status == "online"
+        assert site.agent_last_seen is not None
+
+
+class TestSyncState:
+    """Test SyncState model for multi-site sync tracking."""
+
+    def test_sync_state_creation(self, session):
+        """SyncState can be created with required fields."""
+        site = DeviceGroup(name="us-east", is_site=True)
+        session.add(site)
+        session.flush()
+
+        sync = SyncState(
+            entity_type="node",
+            entity_id="some-node-id",
+            site_id=site.id,
+            last_modified_by="central",
+            checksum="abc123",
+        )
+        session.add(sync)
+        session.commit()
+
+        assert sync.id is not None
+        assert sync.entity_type == "node"
+        assert sync.version == 1
+        assert sync.last_modified_by == "central"
+
+    def test_sync_state_unique_constraint(self, session):
+        """SyncState enforces unique constraint on entity_type+entity_id+site_id."""
+        site = DeviceGroup(name="us-east", is_site=True)
+        session.add(site)
+        session.flush()
+
+        sync1 = SyncState(
+            entity_type="node",
+            entity_id="node-123",
+            site_id=site.id,
+            last_modified_by="central",
+        )
+        session.add(sync1)
+        session.commit()
+
+        sync2 = SyncState(
+            entity_type="node",
+            entity_id="node-123",
+            site_id=site.id,
+            last_modified_by="site",
+        )
+        session.add(sync2)
+
+        with pytest.raises(Exception):  # IntegrityError
+            session.commit()
+
+    def test_sync_state_version_tracking(self, session):
+        """SyncState version can be incremented."""
+        site = DeviceGroup(name="us-east", is_site=True)
+        session.add(site)
+        session.flush()
+
+        sync = SyncState(
+            entity_type="workflow",
+            entity_id="workflow-456",
+            site_id=site.id,
+            last_modified_by="central",
+        )
+        session.add(sync)
+        session.commit()
+
+        assert sync.version == 1
+        sync.version = 2
+        session.commit()
+        assert sync.version == 2
+
+
+class TestSyncConflict:
+    """Test SyncConflict model for conflict tracking."""
+
+    def test_sync_conflict_creation(self, session):
+        """SyncConflict can be created."""
+        site = DeviceGroup(name="us-east", is_site=True)
+        session.add(site)
+        session.flush()
+
+        conflict = SyncConflict(
+            entity_type="node",
+            entity_id="node-789",
+            site_id=site.id,
+            central_state_json='{"state": "active"}',
+            site_state_json='{"state": "pending"}',
+        )
+        session.add(conflict)
+        session.commit()
+
+        assert conflict.id is not None
+        assert conflict.resolution is None
+        assert conflict.resolved_at is None
+
+    def test_sync_conflict_resolution(self, session):
+        """SyncConflict can be resolved."""
+        from datetime import datetime
+
+        site = DeviceGroup(name="us-east", is_site=True)
+        session.add(site)
+        session.flush()
+
+        conflict = SyncConflict(
+            entity_type="node",
+            entity_id="node-789",
+            site_id=site.id,
+            central_state_json='{"state": "active"}',
+            site_state_json='{"state": "pending"}',
+        )
+        session.add(conflict)
+        session.commit()
+
+        conflict.resolution = "accepted_central"
+        conflict.resolved_at = datetime.utcnow()
+        session.commit()
+
+        assert conflict.resolution == "accepted_central"
+        assert conflict.resolved_at is not None
+
+
+class TestMigrationClaim:
+    """Test MigrationClaim model for node migration between sites."""
+
+    def test_migration_claim_creation(self, session):
+        """MigrationClaim can be created."""
+        from datetime import datetime, timedelta
+
+        source = DeviceGroup(name="us-east", is_site=True)
+        target = DeviceGroup(name="eu-west", is_site=True)
+        node = Node(mac_address="00:11:22:33:44:55")
+        session.add_all([source, target, node])
+        session.flush()
+
+        claim = MigrationClaim(
+            node_id=node.id,
+            source_site_id=source.id,
+            target_site_id=target.id,
+            expires_at=datetime.utcnow() + timedelta(hours=24),
+        )
+        session.add(claim)
+        session.commit()
+
+        assert claim.id is not None
+        assert claim.status == "pending"
+        assert claim.auto_approve_eligible is False
+
+    def test_migration_claim_status_transitions(self, session):
+        """MigrationClaim status can transition."""
+        from datetime import datetime, timedelta
+
+        source = DeviceGroup(name="us-east", is_site=True)
+        target = DeviceGroup(name="eu-west", is_site=True)
+        node = Node(mac_address="00:11:22:33:44:55")
+        session.add_all([source, target, node])
+        session.flush()
+
+        claim = MigrationClaim(
+            node_id=node.id,
+            source_site_id=source.id,
+            target_site_id=target.id,
+            expires_at=datetime.utcnow() + timedelta(hours=24),
+        )
+        session.add(claim)
+        session.commit()
+
+        claim.status = "approved"
+        claim.resolved_at = datetime.utcnow()
+        session.commit()
+
+        assert claim.status == "approved"
+        assert claim.resolved_at is not None
+
+    def test_migration_claim_relationships(self, session):
+        """MigrationClaim has correct relationships."""
+        from datetime import datetime, timedelta
+
+        source = DeviceGroup(name="us-east", is_site=True)
+        target = DeviceGroup(name="eu-west", is_site=True)
+        node = Node(mac_address="00:11:22:33:44:55")
+        session.add_all([source, target, node])
+        session.flush()
+
+        claim = MigrationClaim(
+            node_id=node.id,
+            source_site_id=source.id,
+            target_site_id=target.id,
+            expires_at=datetime.utcnow() + timedelta(hours=24),
+        )
+        session.add(claim)
+        session.commit()
+
+        assert claim.node.mac_address == "00:11:22:33:44:55"
+        assert claim.source_site.name == "us-east"
+        assert claim.target_site.name == "eu-west"
 
 
 class TestTemplateVersion:
