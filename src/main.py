@@ -41,6 +41,7 @@ from src.core.escalation_job import process_escalations
 from src.core.agent_status_job import update_agent_statuses
 from src.db.models import Node, NodeHealthSnapshot
 from src.services.audit import audit_service
+from src.utils.network import get_primary_ip
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -96,10 +97,17 @@ async def lifespan(app: FastAPI):
 
     # Start Proxy DHCP if enabled
     if settings.dhcp_proxy.enabled:
-        tftp_addr = settings.dhcp_proxy.tftp_server or settings.host
+        # Auto-detect server IP if host is 0.0.0.0 (bind-all)
+        # DHCP proxy needs actual IP to tell clients where to connect
+        server_ip = settings.host
+        if server_ip == "0.0.0.0":
+            server_ip = get_primary_ip()
+            logger.info(f"Auto-detected server IP: {server_ip}")
+
+        tftp_addr = settings.dhcp_proxy.tftp_server or server_ip
         http_addr = (
             settings.dhcp_proxy.http_server
-            or f"{settings.host}:{settings.port}"
+            or f"{server_ip}:{settings.port}"
         )
         dhcp_proxy = DHCPProxy(
             tftp_server=tftp_addr,

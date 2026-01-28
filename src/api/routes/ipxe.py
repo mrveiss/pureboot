@@ -56,8 +56,15 @@ async def get_boot_script(server: str | None = None):
     This is the script that embedded iPXE binaries chain to.
     """
     from src.config import settings
+    from src.utils.network import get_primary_ip
 
-    server_address = server or f"{settings.host}:{settings.port}"
+    # Auto-detect server IP if host is 0.0.0.0
+    if server:
+        server_address = server
+    elif settings.host == "0.0.0.0":
+        server_address = f"{get_primary_ip()}:{settings.port}"
+    else:
+        server_address = f"{settings.host}:{settings.port}"
 
     generator = IPXEScriptGenerator(
         server_address=server_address,
