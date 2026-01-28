@@ -2,14 +2,22 @@
 import socket
 from datetime import datetime
 
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.schemas import ApiResponse
 from src.config import settings
+from src.core.system_settings import (
+    DEFAULT_BANDWIDTH_MBPS,
+    SETTING_DEFAULT_BOOT_BACKEND_ID,
+    SETTING_FILE_SERVING_BANDWIDTH_MBPS,
+    get_setting,
+    set_setting,
+)
 from src.db.database import get_db
-from src.db.models import Node
+from src.db.models import Node, StorageBackend
 
 router = APIRouter(prefix="/system", tags=["system"])
 
@@ -136,3 +144,70 @@ async def get_server_info() -> ServerInfoResponse:
         dhcp_proxy_enabled=settings.dhcp_proxy.enabled,
         dhcp_proxy_port=settings.dhcp_proxy.port,
     )
+
+
+class SystemSettingsResponse(BaseModel):
+    """Current system settings."""
+
+    default_boot_backend_id: str | None
+    file_serving_bandwidth_mbps: int
+
+
+class SystemSettingsUpdate(BaseModel):
+    """Update system settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    default_boot_backend_id: str | None = None
+    file_serving_bandwidth_mbps: int | None = Field(None, ge=1, le=100000)
+
+
+@router.get("/settings", response_model=ApiResponse[SystemSettingsResponse])
+async def get_system_settings(
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[SystemSettingsResponse]:
+    """Get current system settings."""
+    backend_id = await get_setting(db, SETTING_DEFAULT_BOOT_BACKEND_ID)
+    bandwidth_str = await get_setting(db, SETTING_FILE_SERVING_BANDWIDTH_MBPS)
+
+    bandwidth = DEFAULT_BANDWIDTH_MBPS
+    if bandwidth_str:
+        try:
+            bandwidth = int(bandwidth_str)
+        except ValueError:
+            pass
+
+    return ApiResponse(
+        data=SystemSettingsResponse(
+            default_boot_backend_id=backend_id,
+            file_serving_bandwidth_mbps=bandwidth,
+        )
+    )
+
+
+@router.patch("/settings", response_model=ApiResponse[SystemSettingsResponse])
+async def update_system_settings(
+    update: SystemSettingsUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[SystemSettingsResponse]:
+    """Update system settings."""
+    update_data = update.model_dump(exclude_unset=True)
+
+    if "default_boot_backend_id" in update_data:
+        backend_id = update_data["default_boot_backend_id"]
+        if backend_id is not None:
+            # Validate backend exists
+            result = await db.execute(
+                select(StorageBackend).where(StorageBackend.id == backend_id)
+            )
+            if not result.scalar_one_or_none():
+                raise HTTPException(status_code=404, detail="Storage backend not found")
+        await set_setting(db, SETTING_DEFAULT_BOOT_BACKEND_ID, backend_id)
+
+    if "file_serving_bandwidth_mbps" in update_data:
+        bandwidth = update_data["file_serving_bandwidth_mbps"]
+        if bandwidth is not None:
+            await set_setting(db, SETTING_FILE_SERVING_BANDWIDTH_MBPS, str(bandwidth))
+
+    await db.commit()
+    return await get_system_settings(db)
