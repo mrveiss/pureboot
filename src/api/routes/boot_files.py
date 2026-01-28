@@ -1,12 +1,14 @@
 """Boot files serving endpoint with checksums and throttling."""
 import json
 import logging
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.bandwidth_throttler import get_throttler, throttled_iterator
 from src.core.storage import get_backend_service
 from src.core.system_settings import get_default_boot_backend_id
 from src.db.database import get_db
@@ -103,8 +105,18 @@ async def serve_boot_file(
 
     logger.debug(f"Serving boot file: {file_path} (checksum: {checksum or 'unknown'})")
 
-    return StreamingResponse(
+    # Register with throttler and wrap iterator for bandwidth management
+    throttler = get_throttler()
+    transfer_id = f"boot-{file_path}-{time.time()}"
+    await throttler.register_transfer(transfer_id, file_path, size or 0)
+    throttled_content = throttled_iterator(
+        transfer_id,
         content_iterator,
+        throttler,
+    )
+
+    return StreamingResponse(
+        throttled_content,
         media_type=mime_type,
         headers=headers,
     )
