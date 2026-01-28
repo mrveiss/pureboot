@@ -5,9 +5,7 @@ import {
   Wifi,
   WifiOff,
   Clock,
-  HardDrive,
   Activity,
-  Server,
 } from 'lucide-react'
 import {
   Card,
@@ -23,8 +21,6 @@ import {
   SelectContent,
   SelectItem,
   Label,
-  Input,
-  DialogFooter,
 } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import { useUpdateSite, useTriggerSiteSync } from '@/hooks'
@@ -202,7 +198,7 @@ export function AgentDashboardPanel({ site, health }: AgentDashboardPanelProps) 
                   <Label>Autonomy Level</Label>
                   <Select
                     value={editForm.autonomy_level}
-                    onValueChange={(v) => setEditForm({ ...editForm, autonomy_level: v })}
+                    onValueChange={(v) => setEditForm({ ...editForm, autonomy_level: v as AutonomyLevel })}
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -218,7 +214,7 @@ export function AgentDashboardPanel({ site, health }: AgentDashboardPanelProps) 
                   <Label>Cache Policy</Label>
                   <Select
                     value={editForm.cache_policy}
-                    onValueChange={(v) => setEditForm({ ...editForm, cache_policy: v })}
+                    onValueChange={(v) => setEditForm({ ...editForm, cache_policy: v as CachePolicy })}
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -234,7 +230,7 @@ export function AgentDashboardPanel({ site, health }: AgentDashboardPanelProps) 
                   <Label>Conflict Resolution</Label>
                   <Select
                     value={editForm.conflict_resolution}
-                    onValueChange={(v) => setEditForm({ ...editForm, conflict_resolution: v })}
+                    onValueChange={(v) => setEditForm({ ...editForm, conflict_resolution: v as ConflictResolution })}
                   >
                     <SelectTrigger>
                       <SelectValue />

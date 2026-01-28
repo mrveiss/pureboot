@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
-import { Server, AlertTriangle, Clock, Database } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle, Progress } from '@/components/ui'
+import { Server, Clock, Database } from 'lucide-react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui'
 import { SiteStatusBadge } from './SiteStatusBadge'
 import type { Site } from '@/types/site'
 

@@ -1,4 +1,4 @@
-import { ArrowRight, Clock } from 'lucide-react'
+import { Clock } from 'lucide-react'
 import { Button, Card, CardContent, CardHeader, CardTitle } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import type { SiteConflict, ConflictResolutionAction } from '@/types/site'

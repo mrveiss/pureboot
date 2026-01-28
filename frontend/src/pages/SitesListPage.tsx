@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { Plus, Search, Filter, Globe } from 'lucide-react'
+import { Plus, Search, Globe } from 'lucide-react'
 import { Button, Input, Badge } from '@/components/ui'
 import { SiteCard, CreateSiteDialog } from '@/components/sites'
 import { useSites } from '@/hooks'
