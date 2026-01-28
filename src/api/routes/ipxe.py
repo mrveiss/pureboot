@@ -18,7 +18,6 @@ class BuildRequest(BaseModel):
     server_address: str
     architecture: Literal["bios", "uefi"] = "bios"
     timeout: int = 5
-    show_menu: bool = True
 
 
 @router.post("/ipxe/build")
@@ -63,7 +62,6 @@ async def get_boot_script(server: str | None = None):
     generator = IPXEScriptGenerator(
         server_address=server_address,
         timeout=settings.boot_menu.timeout,
-        show_menu=settings.boot_menu.show_menu,
         logo_url=settings.boot_menu.logo_url
     )
 

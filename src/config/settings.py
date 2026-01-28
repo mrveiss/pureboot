@@ -31,7 +31,6 @@ class DHCPProxySettings(BaseSettings):
 class BootMenuSettings(BaseSettings):
     """Boot menu settings."""
     timeout: int = 5
-    show_menu: bool = True
     logo_url: str = "/assets/pureboot-logo.png"
 
 
@@ -85,6 +84,75 @@ class NFSSettings(BaseSettings):
     default_base_image: str = "ubuntu-arm64"
 
 
+class AgentSettings(BaseSettings):
+    """Site agent configuration.
+
+    When mode='agent', PureBoot runs as a site agent instead of central controller.
+    The agent serves boot files locally and reports to the central controller.
+    """
+    # Operating mode: 'controller' (default) or 'agent'
+    mode: str = "controller"
+
+    # Site ID this agent belongs to (required when mode=agent)
+    site_id: str | None = None
+
+    # Central controller URL (required when mode=agent)
+    central_url: str | None = None
+
+    # Registration token (used for initial registration)
+    registration_token: str | None = None
+
+    # Heartbeat interval in seconds
+    heartbeat_interval: int = 60
+
+    # Local data directory for agent
+    data_dir: Path = Path("/var/lib/pureboot-agent")
+
+    # Cache settings
+    cache_dir: Path = Path("/var/lib/pureboot-agent/cache")
+    cache_max_size_gb: int = 50
+
+    # Cache policy: minimal, assigned, mirror, pattern
+    # - minimal: Bootloaders only
+    # - assigned: Bootloaders + content assigned to this site
+    # - mirror: Full sync of all content from central
+    # - pattern: Cache items matching glob patterns
+    cache_policy: str = "assigned"
+
+    # Glob patterns for pattern policy (e.g., "templates/kickstart/*")
+    cache_patterns: list[str] = []
+
+    # Cache retention in days (0 = never expire)
+    cache_retention_days: int = 30
+
+    # Node state cache TTL in seconds
+    node_cache_ttl: int = 300  # 5 minutes
+
+    # Sync schedule (cron format, e.g., "0 2 * * *" for 2 AM daily)
+    sync_schedule: str = "0 2 * * *"
+
+    # Retry settings for central communication
+    retry_max_attempts: int = 3
+    retry_backoff_seconds: int = 5
+
+    # Whether agent has completed initial registration
+    registered: bool = False
+
+    # Phase 4: Offline operation settings
+    # Connectivity monitoring
+    connectivity_check_interval: int = 30  # Seconds between connectivity checks
+    connectivity_timeout: float = 5.0  # Timeout for health check
+    connectivity_failure_threshold: int = 3  # Failures before marking offline
+
+    # Offline boot behavior
+    offline_default_action: str = "local"  # local, discovery, last_known
+
+    # Queue settings for offline operations
+    queue_batch_size: int = 10  # Items to process per batch
+    queue_retry_delay: float = 5.0  # Seconds between retries
+    queue_max_retries: int = 3  # Max retry attempts
+
+
 class Settings(BaseSettings):
     """Main application settings."""
     model_config = SettingsConfigDict(
@@ -111,9 +179,20 @@ class Settings(BaseSettings):
     ca: CASettings = Field(default_factory=CASettings)
     pi: PiSettings = Field(default_factory=PiSettings)
     nfs: NFSSettings = Field(default_factory=NFSSettings)
+    agent: AgentSettings = Field(default_factory=AgentSettings)
 
     # Installation timeout in minutes (0 = disabled)
     install_timeout_minutes: int = 60
+
+    @property
+    def is_agent_mode(self) -> bool:
+        """Check if running in agent mode."""
+        return self.agent.mode == "agent"
+
+    @property
+    def is_controller_mode(self) -> bool:
+        """Check if running in controller mode."""
+        return self.agent.mode == "controller"
 
 
 settings = Settings()

@@ -22,7 +22,6 @@ class IPXEScriptGenerator:
 
     server_address: str
     timeout: int = 5
-    show_menu: bool = True
     logo_url: str | None = None
 
     def generate_boot_script(self) -> str:
@@ -66,35 +65,8 @@ class IPXEScriptGenerator:
             ":retry",
             f"chain --timeout {timeout_ms} http://{self.server_address}/api/v1/boot?mac=${{mac:hexhyp}} && goto end ||",
             "echo Server unreachable. Retrying in 5 seconds...",
-            "echo Press 'L' for local boot, 'S' for shell",
-            "sleep 5 || goto localboot",
+            "sleep 5",
             "goto retry",
-            "",
-        ])
-
-        if self.show_menu:
-            lines.extend([
-                ":menu",
-                "menu PureBoot Options",
-                "item --key c continue Continue with assigned action",
-                "item --key l localboot Boot from local disk",
-                "item --key r retry Retry server connection",
-                "item --key s shell iPXE shell",
-                f"choose --default continue --timeout {timeout_ms} selected || goto continue",
-                "goto ${selected}",
-                "",
-                ":continue",
-                f"chain http://{self.server_address}/api/v1/boot?mac=${{mac:hexhyp}}",
-                "",
-            ])
-
-        lines.extend([
-            ":localboot",
-            "echo Booting from local disk...",
-            "exit",
-            "",
-            ":shell",
-            "shell",
             "",
             ":end",
         ])
@@ -112,8 +84,15 @@ exit
     def generate_embedded_script(self) -> str:
         """Generate script to embed in iPXE binary."""
         return f"""#!ipxe
+:start
 dhcp
-chain http://{self.server_address}/api/v1/ipxe/boot.ipxe || shell
+chain http://{self.server_address}/api/v1/ipxe/boot.ipxe || goto retry
+goto end
+:retry
+echo Server unreachable, retrying in 5s...
+sleep 5
+goto start
+:end
 """
 
     def generate_install_script(

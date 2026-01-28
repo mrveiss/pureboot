@@ -13,7 +13,11 @@ class Base(DeclarativeBase):
 
 
 class DeviceGroup(Base):
-    """Device group for organizing nodes with shared settings."""
+    """Device group for organizing nodes with shared settings.
+
+    Can also represent a site when is_site=True, which adds agent
+    connection and autonomy configuration for multi-site deployments.
+    """
 
     __tablename__ = "device_groups"
 
@@ -23,9 +27,54 @@ class DeviceGroup(Base):
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     description: Mapped[str | None] = mapped_column(String(500))
 
-    # Default settings for nodes in this group
+    # Hierarchy
+    parent_id: Mapped[str | None] = mapped_column(
+        ForeignKey("device_groups.id", ondelete="RESTRICT"), nullable=True
+    )
+    path: Mapped[str] = mapped_column(String(1000), index=True, default="/")
+    depth: Mapped[int] = mapped_column(default=0)
+
+    # Default settings for nodes in this group (nullable for inheritance)
     default_workflow_id: Mapped[str | None] = mapped_column(String(36))
-    auto_provision: Mapped[bool] = mapped_column(default=False)
+    auto_provision: Mapped[bool | None] = mapped_column(default=None)
+
+    # Site-specific fields (null for regular groups)
+    is_site: Mapped[bool] = mapped_column(default=False)
+
+    # Site agent connection (only when is_site=True)
+    agent_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    agent_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    agent_status: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )  # online, offline, degraded
+    agent_last_seen: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    # Site autonomy settings
+    autonomy_level: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )  # readonly, limited, full
+    conflict_resolution: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )  # central_wins, last_write, site_wins, manual
+
+    # Content caching policy
+    cache_policy: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )  # minimal, assigned, mirror, pattern
+    cache_patterns_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cache_max_size_gb: Mapped[int | None] = mapped_column(nullable=True)
+    cache_retention_days: Mapped[int | None] = mapped_column(nullable=True)
+
+    # Network discovery config
+    discovery_method: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )  # dhcp, dns, anycast, fallback
+    discovery_config_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Migration policy
+    migration_policy: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )  # manual, auto_accept, auto_release, bidirectional
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(default=func.now())
@@ -34,6 +83,15 @@ class DeviceGroup(Base):
     )
 
     # Relationships
+    parent: Mapped["DeviceGroup | None"] = relationship(
+        "DeviceGroup",
+        back_populates="children",
+        remote_side="DeviceGroup.id",
+    )
+    children: Mapped[list["DeviceGroup"]] = relationship(
+        "DeviceGroup",
+        back_populates="parent",
+    )
     nodes: Mapped[list["Node"]] = relationship(back_populates="group")
     user_groups: Mapped[list["UserGroup"]] = relationship(
         secondary="user_group_device_groups", back_populates="device_groups"
@@ -69,7 +127,16 @@ class Node(Base):
 
     # Relationships
     group_id: Mapped[str | None] = mapped_column(ForeignKey("device_groups.id"))
-    group: Mapped[DeviceGroup | None] = relationship(back_populates="nodes")
+    group: Mapped[DeviceGroup | None] = relationship(
+        back_populates="nodes", foreign_keys=[group_id]
+    )
+
+    # Physical site where node boots from (may differ from logical group)
+    home_site_id: Mapped[str | None] = mapped_column(
+        ForeignKey("device_groups.id"), nullable=True
+    )
+    home_site: Mapped["DeviceGroup | None"] = relationship(foreign_keys=[home_site_id])
+
     tags: Mapped[list["NodeTag"]] = relationship(
         back_populates="node", cascade="all, delete-orphan"
     )
@@ -370,6 +437,9 @@ class Template(Base):
     size_bytes: Mapped[int | None] = mapped_column(nullable=True)
     checksum: Mapped[str | None] = mapped_column(String(64))  # SHA256
 
+    # Version tracking
+    current_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
     # Metadata
     description: Mapped[str | None] = mapped_column(Text)
 
@@ -378,6 +448,301 @@ class Template(Base):
     updated_at: Mapped[datetime] = mapped_column(
         default=func.now(), onupdate=func.now()
     )
+
+    # Relationships
+    versions: Mapped[list["TemplateVersion"]] = relationship(
+        back_populates="template", cascade="all, delete-orphan"
+    )
+
+
+class TemplateVersion(Base):
+    """Version of a template with semantic major.minor versioning."""
+
+    __tablename__ = "template_versions"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    template_id: Mapped[str] = mapped_column(
+        ForeignKey("templates.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    major: Mapped[int] = mapped_column(nullable=False)
+    minor: Mapped[int] = mapped_column(nullable=False)
+
+    # Content
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    size_bytes: Mapped[int | None] = mapped_column(nullable=True)
+
+    # Metadata
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    created_by_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    commit_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # File storage (optional, for large templates stored externally)
+    file_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    storage_backend_id: Mapped[str | None] = mapped_column(
+        ForeignKey("storage_backends.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Relationships
+    template: Mapped["Template"] = relationship(back_populates="versions")
+    created_by: Mapped["User | None"] = relationship()
+    storage_backend: Mapped["StorageBackend | None"] = relationship()
+
+    @property
+    def version_string(self) -> str:
+        """Return semantic version string (e.g., 'v1.0')."""
+        return f"v{self.major}.{self.minor}"
+
+    __table_args__ = (
+        UniqueConstraint("template_id", "major", "minor", name="uq_template_version"),
+    )
+
+
+class Workflow(Base):
+    """Workflow definition for provisioning orchestration."""
+
+    __tablename__ = "workflows"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="")
+    os_family: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True
+    )  # linux, windows, bsd
+    architecture: Mapped[str] = mapped_column(String(50), default="x86_64")
+    boot_mode: Mapped[str] = mapped_column(String(50), default="bios")
+    is_active: Mapped[bool] = mapped_column(default=True, index=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        default=func.now(), onupdate=func.now()
+    )
+
+    # Relationships
+    steps: Mapped[list["WorkflowStep"]] = relationship(
+        back_populates="workflow",
+        cascade="all, delete-orphan",
+        order_by="WorkflowStep.sequence",
+    )
+
+
+class WorkflowStep(Base):
+    """Individual step within a workflow for provisioning orchestration."""
+
+    __tablename__ = "workflow_steps"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    workflow_id: Mapped[str] = mapped_column(
+        ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    sequence: Mapped[int] = mapped_column(nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # boot, script, reboot, wait, cloud_init
+
+    # Step configuration
+    config_json: Mapped[str] = mapped_column(Text, default="{}")
+    timeout_seconds: Mapped[int] = mapped_column(default=3600)
+
+    # Failure handling
+    on_failure: Mapped[str] = mapped_column(
+        String(50), default="fail"
+    )  # fail, retry, skip, rollback
+    max_retries: Mapped[int] = mapped_column(default=3)
+    retry_delay_seconds: Mapped[int] = mapped_column(default=30)
+
+    # State transition
+    next_state: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
+    )  # node state after step completes
+    rollback_step_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
+    # Relationships
+    workflow: Mapped["Workflow"] = relationship(back_populates="steps")
+
+    __table_args__ = (
+        UniqueConstraint("workflow_id", "sequence", name="uq_workflow_step_sequence"),
+    )
+
+
+class WorkflowExecution(Base):
+    """Execution instance of a workflow on a specific node."""
+
+    __tablename__ = "workflow_executions"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    workflow_id: Mapped[str] = mapped_column(
+        ForeignKey("workflows.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    current_step_id: Mapped[str | None] = mapped_column(
+        ForeignKey("workflow_steps.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Status: pending, running, completed, failed, cancelled
+    status: Mapped[str] = mapped_column(
+        String(50), default="pending", nullable=False, index=True
+    )
+
+    # Timing
+    started_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    # Error tracking
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    # Relationships
+    node: Mapped["Node"] = relationship()
+    workflow: Mapped["Workflow"] = relationship()
+    current_step: Mapped["WorkflowStep | None"] = relationship()
+    step_results: Mapped[list["StepResult"]] = relationship(
+        back_populates="execution", cascade="all, delete-orphan"
+    )
+
+
+class StepResult(Base):
+    """Result of executing a workflow step."""
+
+    __tablename__ = "step_results"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    execution_id: Mapped[str] = mapped_column(
+        ForeignKey("workflow_executions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    step_id: Mapped[str] = mapped_column(
+        ForeignKey("workflow_steps.id", ondelete="CASCADE"), nullable=False
+    )
+    attempt: Mapped[int] = mapped_column(default=1)
+    status: Mapped[str] = mapped_column(String(50), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    exit_code: Mapped[int | None] = mapped_column(nullable=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    logs: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Relationships
+    execution: Mapped["WorkflowExecution"] = relationship(back_populates="step_results")
+    step: Mapped["WorkflowStep"] = relationship()
+
+
+# =============================================================================
+# Multi-Site Sync Models
+# =============================================================================
+
+
+class SyncState(Base):
+    """Tracks sync state per entity for multi-site synchronization."""
+
+    __tablename__ = "sync_states"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    entity_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # node, workflow, template
+    entity_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    site_id: Mapped[str] = mapped_column(
+        ForeignKey("device_groups.id"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(default=1)
+    last_modified: Mapped[datetime] = mapped_column(default=func.now())
+    last_modified_by: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # site_id or "central"
+    checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Relationships
+    site: Mapped["DeviceGroup"] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint(
+            "entity_type", "entity_id", "site_id", name="uq_sync_state_entity_site"
+        ),
+        Index("ix_sync_state_entity", "entity_type", "entity_id"),
+    )
+
+
+class SyncConflict(Base):
+    """Conflicts pending manual resolution during multi-site sync."""
+
+    __tablename__ = "sync_conflicts"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    entity_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    site_id: Mapped[str] = mapped_column(
+        ForeignKey("device_groups.id"), nullable=False
+    )
+    central_state_json: Mapped[str] = mapped_column(Text, nullable=False)
+    site_state_json: Mapped[str] = mapped_column(Text, nullable=False)
+    detected_at: Mapped[datetime] = mapped_column(default=func.now())
+    resolved_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    resolution: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )  # accepted_central, accepted_site, merged
+
+    # Relationships
+    site: Mapped["DeviceGroup"] = relationship()
+
+
+class MigrationClaim(Base):
+    """Tracks node migration between sites."""
+
+    __tablename__ = "migration_claims"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_site_id: Mapped[str] = mapped_column(
+        ForeignKey("device_groups.id"), nullable=False
+    )
+    target_site_id: Mapped[str] = mapped_column(
+        ForeignKey("device_groups.id"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), default="pending"
+    )  # pending, approved, rejected, expired
+    auto_approve_eligible: Mapped[bool] = mapped_column(default=False)
+    policy_matched: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    approval_id: Mapped[str | None] = mapped_column(
+        ForeignKey("approvals.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    resolved_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(nullable=False)
+
+    # Relationships
+    node: Mapped["Node"] = relationship()
+    source_site: Mapped["DeviceGroup"] = relationship(foreign_keys=[source_site_id])
+    target_site: Mapped["DeviceGroup"] = relationship(foreign_keys=[target_site_id])
+    approval: Mapped["Approval | None"] = relationship()
 
 
 class Approval(Base):

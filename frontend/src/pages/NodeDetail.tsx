@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Server, Clock, Cpu, Network, Tag, Workflow, X, Play, RotateCcw, HardDrive } from 'lucide-react'
+import { ArrowLeft, Server, Clock, Cpu, Network, Tag, Workflow, X, Play, RotateCcw, HardDrive, AlertTriangle } from 'lucide-react'
 import {
   Button,
   Card,
@@ -39,8 +39,14 @@ export function NodeDetail() {
 
   const [workflowDialogOpen, setWorkflowDialogOpen] = useState(false)
   const [selectedWorkflow, setSelectedWorkflow] = useState<string>('')
+  const [forceStateDialogOpen, setForceStateDialogOpen] = useState(false)
+  const [selectedForceState, setSelectedForceState] = useState<string>('')
 
   const workflows = workflowsResponse?.data ?? []
+  const allStates: NodeState[] = [
+    'discovered', 'ignored', 'pending', 'installing', 'install_failed', 'installed',
+    'active', 'reprovision', 'migrating', 'retired', 'decommissioned', 'wiping'
+  ]
 
   if (isLoading) {
     return (
@@ -106,6 +112,19 @@ export function NodeDetail() {
   const openWorkflowDialog = () => {
     setSelectedWorkflow(node.workflow_id || 'none')
     setWorkflowDialogOpen(true)
+  }
+
+  const handleForceState = () => {
+    if (!selectedForceState) return
+    updateState.mutate(
+      { nodeId: node.id, newState: selectedForceState as NodeState, force: true },
+      {
+        onSuccess: () => {
+          setForceStateDialogOpen(false)
+          setSelectedForceState('')
+        },
+      }
+    )
   }
 
   const currentWorkflow = workflows.find((w) => w.id === node.workflow_id)
@@ -412,6 +431,46 @@ export function NodeDetail() {
             </Card>
           )}
 
+          {/* Admin Override - Force State */}
+          <Card className="border-amber-500/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-amber-500">
+                <AlertTriangle className="h-5 w-5" />
+                Admin Override
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Force state changes bypass the state machine validation. Use with caution.
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedForceState('')
+                    setForceStateDialogOpen(true)
+                  }}
+                >
+                  Force State Change
+                </Button>
+                {node.state !== 'discovered' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSelectedForceState('discovered')
+                      setForceStateDialogOpen(true)
+                    }}
+                  >
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                    Reset to Discovered
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Workflow assignment */}
           <Card>
             <CardHeader>
@@ -506,6 +565,59 @@ export function NodeDetail() {
               disabled={!selectedWorkflow || updateNode.isPending || workflows.length === 0}
             >
               {updateNode.isPending ? 'Assigning...' : 'Assign'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Force State Dialog */}
+      <Dialog open={forceStateDialogOpen} onOpenChange={setForceStateDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-500">
+              <AlertTriangle className="h-5 w-5" />
+              Force State Change
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-3">
+              <p className="text-sm text-amber-200">
+                This will bypass state machine validation and force the node to the selected state.
+                Install attempts and error counters will be reset.
+              </p>
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block">Select Target State</label>
+              <Select value={selectedForceState} onValueChange={setSelectedForceState}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a state..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {allStates.map((state) => (
+                    <SelectItem key={state} value={state} disabled={state === node.state}>
+                      <div className="flex items-center gap-2">
+                        <div className={cn('h-2 w-2 rounded-full', NODE_STATE_COLORS[state])} />
+                        <span>{NODE_STATE_LABELS[state]}</span>
+                        {state === node.state && (
+                          <span className="text-xs text-muted-foreground">(current)</span>
+                        )}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setForceStateDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleForceState}
+              disabled={!selectedForceState || selectedForceState === node.state || updateState.isPending}
+            >
+              {updateState.isPending ? 'Forcing...' : 'Force Change'}
             </Button>
           </DialogFooter>
         </DialogContent>

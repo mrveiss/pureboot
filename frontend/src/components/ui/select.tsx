@@ -90,9 +90,12 @@ function SelectContent({ children, className }: SelectContentProps) {
 
   React.useEffect(() => {
     if (open) {
-      const handleClickOutside = () => setOpen(false)
-      document.addEventListener('click', handleClickOutside)
-      return () => document.removeEventListener('click', handleClickOutside)
+      // Use setTimeout to avoid catching the same click that opened the dropdown
+      const timeoutId = setTimeout(() => {
+        const handleClickOutside = () => setOpen(false)
+        document.addEventListener('click', handleClickOutside, { once: true })
+      }, 0)
+      return () => clearTimeout(timeoutId)
     }
   }, [open, setOpen])
 

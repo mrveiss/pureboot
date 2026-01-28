@@ -1,0 +1,160 @@
+# PureBoot Docker Compose Configuration
+#
+# This file provides example configurations for running PureBoot in Docker.
+# Choose the appropriate profile based on your deployment:
+#
+# Controller (Central):
+#   docker compose --profile controller up -d
+#
+# Site Agent:
+#   docker compose --profile agent up -d
+#
+# Both (for local testing):
+#   docker compose --profile controller --profile agent up -d
+
+version: '3.8'
+
+services:
+  # ============================================
+  # Central Controller
+  # ============================================
+  controller:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles:
+      - controller
+    container_name: pureboot-controller
+    restart: unless-stopped
+    ports:
+      - "8080:8080"      # HTTP API and Web UI
+      - "69:69/udp"      # TFTP
+      - "4011:4011/udp"  # Proxy DHCP (optional)
+    volumes:
+      - pureboot-data:/var/lib/pureboot
+      - pureboot-certs:/opt/pureboot/certs
+      - ./tftp:/tftp
+      - ./workflows:/var/lib/pureboot/workflows:ro
+    environment:
+      - PUREBOOT_DEBUG=false
+      - PUREBOOT_SECRET_KEY=${PUREBOOT_SECRET_KEY:-CHANGE_ME_IN_PRODUCTION_32_CHARS!}
+      - PUREBOOT_DATABASE__URL=sqlite+aiosqlite:////var/lib/pureboot/data/pureboot.db
+      # Enable proxy DHCP if your DHCP server doesn't support PXE options
+      - PUREBOOT_DHCP_PROXY__ENABLED=false
+    # Required for TFTP on port 69
+    cap_add:
+      - NET_BIND_SERVICE
+    networks:
+      - pureboot-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ============================================
+  # Site Agent
+  # ============================================
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    profiles:
+      - agent
+    container_name: pureboot-agent
+    restart: unless-stopped
+    ports:
+      - "8080:8080"   # HTTP boot service
+      - "69:69/udp"   # TFTP
+    volumes:
+      - agent-cache:/var/lib/pureboot-agent/cache
+      - agent-data:/var/lib/pureboot-agent
+    environment:
+      # Required: Configure these for your site
+      - PUREBOOT_AGENT__MODE=agent
+      - PUREBOOT_AGENT__SITE_ID=${AGENT_SITE_ID:-site-001}
+      - PUREBOOT_AGENT__CENTRAL_URL=${AGENT_CENTRAL_URL:-http://central:8080}
+      - PUREBOOT_AGENT__REGISTRATION_TOKEN=${AGENT_REGISTRATION_TOKEN}
+      # Optional: Adjust cache settings
+      - PUREBOOT_AGENT__CACHE_MAX_SIZE_GB=50
+      - PUREBOOT_AGENT__HEARTBEAT_INTERVAL=60
+    # Required for TFTP on port 69
+    cap_add:
+      - NET_BIND_SERVICE
+    networks:
+      - pureboot-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ============================================
+  # Controller with PostgreSQL (Production)
+  # ============================================
+  controller-postgres:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles:
+      - production
+    container_name: pureboot-controller
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+      - "69:69/udp"
+      - "4011:4011/udp"
+    volumes:
+      - pureboot-certs:/opt/pureboot/certs
+      - ./tftp:/tftp
+      - ./workflows:/var/lib/pureboot/workflows:ro
+    environment:
+      - PUREBOOT_DEBUG=false
+      - PUREBOOT_SECRET_KEY=${PUREBOOT_SECRET_KEY}
+      - PUREBOOT_DATABASE__URL=postgresql+asyncpg://pureboot:${POSTGRES_PASSWORD}@postgres:5432/pureboot
+    cap_add:
+      - NET_BIND_SERVICE
+    networks:
+      - pureboot-net
+
+  postgres:
+    image: postgres:15-alpine
+    profiles:
+      - production
+    container_name: pureboot-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=pureboot
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=pureboot
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - pureboot-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pureboot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pureboot-data:
+    name: pureboot-data
+  pureboot-certs:
+    name: pureboot-certs
+  agent-cache:
+    name: pureboot-agent-cache
+  agent-data:
+    name: pureboot-agent-data
+  postgres-data:
+    name: pureboot-postgres-data
+
+networks:
+  pureboot-net:
+    name: pureboot-network
+    driver: bridge
