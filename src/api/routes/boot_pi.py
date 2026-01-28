@@ -241,18 +241,25 @@ def _get_workflow_response(node: Node, workflow: Workflow, server: str) -> PiBoo
 
     elif workflow.install_method == "nfs":
         # NFS root boot (diskless)
-        # Extract NFS parameters from workflow boot_params
-        nfs_server = workflow.boot_params.get("nfs_server", settings.host)
-        nfs_path = workflow.boot_params.get(
-            "nfs_path",
-            f"/srv/nfs/pi-roots/{node.id}",
+        # Extract NFS parameters from workflow or use defaults from settings
+        nfs_server = (
+            workflow.boot_params.get("nfs_server")
+            or getattr(workflow, "nfs_server", None)
+            or settings.host
+        )
+        nfs_base_path = (
+            workflow.boot_params.get("nfs_path")
+            or workflow.boot_params.get("nfs_base_path")
+            or getattr(workflow, "nfs_base_path", None)
+            or str(settings.nfs.root_path)
         )
         return PiBootResponse(
             state="installing",
             message=f"NFS boot: {workflow.name}",
             action="nfs_boot",
             nfs_server=nfs_server,
-            nfs_path=nfs_path,
+            nfs_path=nfs_base_path,
+            callback_url=callback_url,
         )
 
     else:

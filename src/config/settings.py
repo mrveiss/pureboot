@@ -76,6 +76,15 @@ class PiSettings(BaseSettings):
     nodes_dir: Path = Path("./tftp/pi-nodes")
 
 
+class NFSSettings(BaseSettings):
+    """NFS root filesystem settings for diskless Pi boot."""
+    enabled: bool = False
+    root_path: Path = Path("/srv/nfsroot")
+    base_dir: str = "base"
+    nodes_dir: str = "nodes"
+    default_base_image: str = "ubuntu-arm64"
+
+
 class Settings(BaseSettings):
     """Main application settings."""
     model_config = SettingsConfigDict(
@@ -101,6 +110,7 @@ class Settings(BaseSettings):
     audit: AuditSettings = Field(default_factory=AuditSettings)
     ca: CASettings = Field(default_factory=CASettings)
     pi: PiSettings = Field(default_factory=PiSettings)
+    nfs: NFSSettings = Field(default_factory=NFSSettings)
 
     # Installation timeout in minutes (0 = disabled)
     install_timeout_minutes: int = 60

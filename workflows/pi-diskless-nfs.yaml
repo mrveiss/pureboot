@@ -1,0 +1,40 @@
+# Pi Diskless NFS Boot
+# Boots Raspberry Pi from NFS root filesystem with per-node overlay
+#
+# Requirements:
+#   - NFS server configured with /srv/nfsroot export
+#   - Base image in /srv/nfsroot/base/<image-name>/
+#   - Per-node overlay created automatically in /srv/nfsroot/nodes/<serial>/
+#
+# Usage:
+#   Assign this workflow to Pi nodes for diskless operation.
+#   The Pi will boot from the shared base image with a persistent overlay
+#   for per-node configuration (hostname, machine-id, etc.)
+
+id: pi-diskless-nfs
+name: Pi Diskless (NFS Root)
+description: Network boot Raspberry Pi with NFS root filesystem and persistent overlay
+version: "1.0"
+arch: aarch64
+install_method: nfs
+
+# NFS server configuration
+# Set nfs_server to your NFS server IP/hostname
+# Set nfs_base_path to the NFS export root
+boot_params:
+  nfs_server: "{{ nfs_server | default('192.168.1.10') }}"
+  nfs_path: "{{ nfs_base_path | default('/srv/nfsroot') }}"
+
+# No local storage needed for diskless boot
+target_device: null
+
+# Tags for filtering in the UI
+tags:
+  - diskless
+  - nfs
+  - raspberry-pi
+  - aarch64
+
+# Metadata
+author: PureBoot
+created: "2026-01-28"
