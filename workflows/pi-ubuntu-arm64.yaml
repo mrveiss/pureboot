@@ -1,0 +1,49 @@
+# Pi Ubuntu ARM64 Image Deployment
+# Deploys Ubuntu Server ARM64 to Raspberry Pi storage
+#
+# Requirements:
+#   - Ubuntu ARM64 preinstalled server image available via HTTP
+#   - Pi with SD card or USB storage attached
+#
+# The workflow will:
+#   1. Download and decompress the image
+#   2. Write it to the target device
+#   3. Resize the root partition to fill the disk
+#   4. Reboot into the installed OS
+
+id: pi-ubuntu-arm64
+name: Ubuntu Server 24.04 ARM64
+description: Deploy Ubuntu Server 24.04 LTS ARM64 to Raspberry Pi
+version: "1.0"
+arch: aarch64
+install_method: image
+
+# Image configuration
+image_url: "{{ image_url | default('http://pureboot.local/images/ubuntu-24.04-preinstalled-server-arm64+raspi.img.xz') }}"
+target_device: "{{ target_device | default('/dev/mmcblk0') }}"
+
+# Boot parameters passed to deploy environment
+boot_params:
+  resize_rootfs: true
+  post_install_reboot: true
+
+# Post-install configuration
+post_install:
+  - name: Resize root filesystem
+    enabled: true
+  - name: Configure cloud-init
+    enabled: true
+    config:
+      hostname: "{{ hostname | default('pi-{{ serial }}') }}"
+      ssh_authorized_keys: "{{ ssh_keys | default([]) }}"
+
+# Tags for filtering
+tags:
+  - ubuntu
+  - raspberry-pi
+  - aarch64
+  - image-deploy
+
+# Metadata
+author: PureBoot
+created: "2026-01-28"

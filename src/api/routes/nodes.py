@@ -287,6 +287,7 @@ async def create_node(
         model=node_data.model,
         serial_number=node_data.serial_number,
         system_uuid=node_data.system_uuid,
+        pi_model=node_data.pi_model,
     )
     db.add(node)
     await db.flush()
@@ -475,6 +476,23 @@ async def retire_node(
         )
         await db.flush()
         await db.refresh(node, ["tags"])
+
+        # Clean up Pi TFTP directory if this is a Pi node
+        if node.boot_mode == "pi" and node.serial_number:
+            try:
+                from src.pxe import PiManager
+                pi_manager = PiManager(
+                    firmware_dir=settings.pi.firmware_dir,
+                    deploy_dir=settings.pi.deploy_dir,
+                    nodes_dir=settings.pi.nodes_dir,
+                )
+                pi_manager.delete_node_directory(node.serial_number)
+            except Exception as e:
+                # Log but don't fail - TFTP cleanup is best-effort
+                import logging
+                logging.getLogger(__name__).warning(
+                    f"Failed to clean up Pi TFTP directory for {node.serial_number}: {e}"
+                )
 
         return ApiResponse(
             data=NodeResponse.from_node(node),

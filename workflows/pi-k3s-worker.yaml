@@ -1,0 +1,70 @@
+# Pi K3s Worker (Diskless)
+# Boots Raspberry Pi as a diskless K3s cluster worker node
+#
+# Requirements:
+#   - NFS server with K3s-ready base image
+#   - K3s master server running and accessible
+#   - K3s join token available
+#
+# The base image should have K3s agent pre-installed or the post_boot
+# script will install it on first boot.
+
+id: pi-k3s-worker
+name: K3s Worker (Diskless Pi)
+description: Raspberry Pi as diskless K3s cluster worker node
+version: "1.0"
+arch: aarch64
+install_method: nfs
+
+# NFS server configuration for K3s nodes
+boot_params:
+  nfs_server: "{{ nfs_server | default('192.168.1.10') }}"
+  nfs_path: "{{ nfs_base_path | default('/srv/nfsroot/k3s') }}"
+
+# K3s configuration variables
+# These should be set when assigning the workflow to a node
+variables:
+  k3s_server: "{{ k3s_server | default('https://k3s-master:6443') }}"
+  k3s_token: "{{ k3s_token }}"
+  k3s_node_labels: "{{ k3s_node_labels | default('') }}"
+
+# No local storage
+target_device: null
+
+# Post-boot configuration
+# This script runs on first boot to join the K3s cluster
+post_boot:
+  enabled: true
+  scripts:
+    - name: Join K3s cluster
+      run_once: true
+      script: |
+        #!/bin/bash
+        set -e
+
+        # Check if already joined
+        if systemctl is-active k3s-agent &>/dev/null; then
+            echo "K3s agent already running"
+            exit 0
+        fi
+
+        # Install K3s agent
+        curl -sfL https://get.k3s.io | \
+            K3S_URL="{{ k3s_server }}" \
+            K3S_TOKEN="{{ k3s_token }}" \
+            sh -s - agent {{ k3s_node_labels }}
+
+        echo "K3s agent installed and started"
+
+# Tags for filtering
+tags:
+  - k3s
+  - kubernetes
+  - cluster
+  - raspberry-pi
+  - diskless
+  - aarch64
+
+# Metadata
+author: PureBoot
+created: "2026-01-28"

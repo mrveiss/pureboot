@@ -288,3 +288,373 @@ class TestPiManager:
         )
 
         assert "initramfs initramfs.img followkernel" in config
+
+
+class TestGenerateCmdlineForState:
+    """Tests for generate_cmdline_for_state() method."""
+
+    @pytest.fixture
+    def temp_tftp_root(self):
+        """Create temporary TFTP root directory."""
+        root = Path(tempfile.mkdtemp())
+        # Create firmware directory with dummy files
+        firmware_dir = root / "rpi-firmware"
+        firmware_dir.mkdir(parents=True)
+        (firmware_dir / "start4.elf").touch()
+        (firmware_dir / "fixup4.dat").touch()
+        (firmware_dir / "bcm2711-rpi-4-b.dtb").touch()
+
+        # Create deploy directory
+        deploy_dir = root / "deploy-arm64"
+        deploy_dir.mkdir(parents=True)
+        (deploy_dir / "kernel8.img").touch()
+        (deploy_dir / "initramfs.img").touch()
+
+        # Create nodes directory
+        (root / "pi-nodes").mkdir(parents=True)
+
+        yield root
+        shutil.rmtree(root)
+
+    def test_base_params_always_present(self, temp_tftp_root):
+        """Base parameters are always included in cmdline."""
+        from src.pxe.pi_manager import PiManager
+
+        manager = PiManager(
+            firmware_dir=temp_tftp_root / "rpi-firmware",
+            deploy_dir=temp_tftp_root / "deploy-arm64",
+            nodes_dir=temp_tftp_root / "pi-nodes",
+        )
+
+        cmdline = manager.generate_cmdline_for_state(
+            serial="d83add36",
+            state="discovered",
+        )
+
+        # Base params
+        assert "console=serial0,115200" in cmdline
+        assert "console=tty1" in cmdline
+        assert "ip=dhcp" in cmdline
+        assert "pureboot.serial=d83add36" in cmdline
+        assert "pureboot.state=discovered" in cmdline
+        # Ends with quiet loglevel=4 and newline
+        assert cmdline.endswith("quiet loglevel=4\n")
+
+    def test_controller_url_added_when_provided(self, temp_tftp_root):
+        """Controller URL is added when provided."""
+        from src.pxe.pi_manager import PiManager
+
+        manager = PiManager(
+            firmware_dir=temp_tftp_root / "rpi-firmware",
+            deploy_dir=temp_tftp_root / "deploy-arm64",
+            nodes_dir=temp_tftp_root / "pi-nodes",
+        )
+
+        cmdline = manager.generate_cmdline_for_state(
+            serial="d83add36",
+            state="discovered",
+            controller_url="http://192.168.1.100:8080",
+        )
+
+        assert "pureboot.url=http://192.168.1.100:8080" in cmdline
+
+    def test_controller_url_not_added_when_none(self, temp_tftp_root):
+        """Controller URL is not added when not provided."""
+        from src.pxe.pi_manager import PiManager
+
+        manager = PiManager(
+            firmware_dir=temp_tftp_root / "rpi-firmware",
+            deploy_dir=temp_tftp_root / "deploy-arm64",
+            nodes_dir=temp_tftp_root / "pi-nodes",
+        )
+
+        cmdline = manager.generate_cmdline_for_state(
+            serial="d83add36",
+            state="discovered",
+        )
+
+        assert "pureboot.url=" not in cmdline
+
+    def test_installing_state_with_install_params(self, temp_tftp_root):
+        """Installing state adds install mode parameters."""
+        from src.pxe.pi_manager import PiManager
+
+        manager = PiManager(
+            firmware_dir=temp_tftp_root / "rpi-firmware",
+            deploy_dir=temp_tftp_root / "deploy-arm64",
+            nodes_dir=temp_tftp_root / "pi-nodes",
+        )
+
+        cmdline = manager.generate_cmdline_for_state(
+            serial="d83add36",
+            state="installing",
+            image_url="http://pureboot.local/images/ubuntu.img",
+            target_device="/dev/mmcblk0",
+            node_id="node-123",
+            mac="dc:a6:32:aa:bb:cc",
+            callback_url="http://pureboot.local/api/v1/nodes/node-123/callback",
+        )
+
+        assert "pureboot.mode=install" in cmdline
+        assert "pureboot.image_url=http://pureboot.local/images/ubuntu.img" in cmdline
+        assert "pureboot.target=/dev/mmcblk0" in cmdline
+        assert "pureboot.node_id=node-123" in cmdline
+        assert "pureboot.mac=dc:a6:32:aa:bb:cc" in cmdline
+        assert "pureboot.callback=http://pureboot.local/api/v1/nodes/node-123/callback" in cmdline
+        assert "root=/dev/ram0" in cmdline
+        assert "rootfstype=ramfs" in cmdline
+
+    def test_installing_state_without_image_url(self, temp_tftp_root):
+        """Installing state without image_url uses default root."""
+        from src.pxe.pi_manager import PiManager
+
+        manager = PiManager(
+            firmware_dir=temp_tftp_root / "rpi-firmware",
+            deploy_dir=temp_tftp_root / "deploy-arm64",
+            nodes_dir=temp_tftp_root / "pi-nodes",
+        )
+
+        cmdline = manager.generate_cmdline_for_state(
+            serial="d83add36",
+            state="installing",
+        )
+
+        # Without image_url, should not have install mode params
+        assert "pureboot.mode=install" not in cmdline
+        # Should have default root
+        assert "root=/dev/ram0" in cmdline
+        assert "rootfstype=ramfs" in cmdline
+
+    def test_nfs_boot_parameters(self, temp_tftp_root):
+        """NFS boot parameters are added when nfs_server and nfs_path provided."""
+        from src.pxe.pi_manager import PiManager
+
+        manager = PiManager(
+            firmware_dir=temp_tftp_root / "rpi-firmware",
+            deploy_dir=temp_tftp_root / "deploy-arm64",
+            nodes_dir=temp_tftp_root / "pi-nodes",
+        )
+
+        cmdline = manager.generate_cmdline_for_state(
+            serial="d83add36",
+            state="active",
+            nfs_server="192.168.1.10",
+            nfs_path="/exports/pi/d83add36",
+        )
+
+        assert "root=/dev/nfs" in cmdline
+        assert "nfsroot=192.168.1.10:/exports/pi/d83add36,vers=4,tcp" in cmdline
+        assert "rw" in cmdline
+        # Should NOT have ram0 root when using NFS
+        assert "root=/dev/ram0" not in cmdline
+
+    def test_nfs_requires_both_server_and_path(self, temp_tftp_root):
+        """NFS boot only enabled when both server and path provided."""
+        from src.pxe.pi_manager import PiManager
+
+        manager = PiManager(
+            firmware_dir=temp_tftp_root / "rpi-firmware",
+            deploy_dir=temp_tftp_root / "deploy-arm64",
+            nodes_dir=temp_tftp_root / "pi-nodes",
+        )
+
+        # Only server, no path
+        cmdline = manager.generate_cmdline_for_state(
+            serial="d83add36",
+            state="active",
+            nfs_server="192.168.1.10",
+        )
+        assert "root=/dev/nfs" not in cmdline
+        assert "root=/dev/ram0" in cmdline
+
+        # Only path, no server
+        cmdline = manager.generate_cmdline_for_state(
+            serial="d83add36",
+            state="active",
+            nfs_path="/exports/pi/d83add36",
+        )
+        assert "root=/dev/nfs" not in cmdline
+        assert "root=/dev/ram0" in cmdline
+
+    def test_cmdline_is_single_line(self, temp_tftp_root):
+        """Cmdline is a single line ending with newline."""
+        from src.pxe.pi_manager import PiManager
+
+        manager = PiManager(
+            firmware_dir=temp_tftp_root / "rpi-firmware",
+            deploy_dir=temp_tftp_root / "deploy-arm64",
+            nodes_dir=temp_tftp_root / "pi-nodes",
+        )
+
+        cmdline = manager.generate_cmdline_for_state(
+            serial="d83add36",
+            state="installing",
+            image_url="http://pureboot.local/images/ubuntu.img",
+            controller_url="http://pureboot.local:8080",
+        )
+
+        # Single line with newline at end
+        lines = cmdline.split("\n")
+        assert len(lines) == 2  # Content + empty string after final newline
+        assert lines[1] == ""
+
+    def test_invalid_serial_raises_error(self, temp_tftp_root):
+        """Invalid serial number raises ValueError."""
+        from src.pxe.pi_manager import PiManager
+
+        manager = PiManager(
+            firmware_dir=temp_tftp_root / "rpi-firmware",
+            deploy_dir=temp_tftp_root / "deploy-arm64",
+            nodes_dir=temp_tftp_root / "pi-nodes",
+        )
+
+        with pytest.raises(ValueError, match="Invalid serial"):
+            manager.generate_cmdline_for_state(
+                serial="invalid",
+                state="discovered",
+            )
+
+
+class TestUpdateCmdlineForState:
+    """Tests for update_cmdline_for_state() method."""
+
+    @pytest.fixture
+    def temp_tftp_root(self):
+        """Create temporary TFTP root directory."""
+        root = Path(tempfile.mkdtemp())
+        # Create firmware directory with dummy files
+        firmware_dir = root / "rpi-firmware"
+        firmware_dir.mkdir(parents=True)
+        (firmware_dir / "start4.elf").touch()
+        (firmware_dir / "fixup4.dat").touch()
+        (firmware_dir / "bcm2711-rpi-4-b.dtb").touch()
+
+        # Create deploy directory
+        deploy_dir = root / "deploy-arm64"
+        deploy_dir.mkdir(parents=True)
+        (deploy_dir / "kernel8.img").touch()
+        (deploy_dir / "initramfs.img").touch()
+
+        # Create nodes directory
+        (root / "pi-nodes").mkdir(parents=True)
+
+        yield root
+        shutil.rmtree(root)
+
+    def test_update_cmdline_for_state_writes_file(self, temp_tftp_root):
+        """update_cmdline_for_state writes cmdline.txt to node directory."""
+        from src.pxe.pi_manager import PiManager
+
+        manager = PiManager(
+            firmware_dir=temp_tftp_root / "rpi-firmware",
+            deploy_dir=temp_tftp_root / "deploy-arm64",
+            nodes_dir=temp_tftp_root / "pi-nodes",
+        )
+
+        serial = "d83add36"
+        # Create node directory first
+        manager.create_node_directory(serial, pi_model="pi4")
+
+        # Update cmdline for state
+        manager.update_cmdline_for_state(
+            serial=serial,
+            state="installing",
+            image_url="http://pureboot.local/images/ubuntu.img",
+        )
+
+        cmdline_path = temp_tftp_root / "pi-nodes" / serial / "cmdline.txt"
+        assert cmdline_path.exists()
+        content = cmdline_path.read_text()
+        assert "pureboot.state=installing" in content
+        assert "pureboot.mode=install" in content
+
+    def test_update_cmdline_for_state_node_not_found(self, temp_tftp_root):
+        """update_cmdline_for_state raises FileNotFoundError for missing node."""
+        from src.pxe.pi_manager import PiManager
+
+        manager = PiManager(
+            firmware_dir=temp_tftp_root / "rpi-firmware",
+            deploy_dir=temp_tftp_root / "deploy-arm64",
+            nodes_dir=temp_tftp_root / "pi-nodes",
+        )
+
+        with pytest.raises(FileNotFoundError, match="Node directory not found"):
+            manager.update_cmdline_for_state(
+                serial="d83add36",
+                state="installing",
+            )
+
+    def test_update_cmdline_for_state_invalid_serial(self, temp_tftp_root):
+        """update_cmdline_for_state raises ValueError for invalid serial."""
+        from src.pxe.pi_manager import PiManager
+
+        manager = PiManager(
+            firmware_dir=temp_tftp_root / "rpi-firmware",
+            deploy_dir=temp_tftp_root / "deploy-arm64",
+            nodes_dir=temp_tftp_root / "pi-nodes",
+        )
+
+        with pytest.raises(ValueError, match="Invalid serial"):
+            manager.update_cmdline_for_state(
+                serial="not-valid",
+                state="installing",
+            )
+
+    def test_update_cmdline_for_state_with_nfs(self, temp_tftp_root):
+        """update_cmdline_for_state with NFS parameters."""
+        from src.pxe.pi_manager import PiManager
+
+        manager = PiManager(
+            firmware_dir=temp_tftp_root / "rpi-firmware",
+            deploy_dir=temp_tftp_root / "deploy-arm64",
+            nodes_dir=temp_tftp_root / "pi-nodes",
+        )
+
+        serial = "d83add36"
+        manager.create_node_directory(serial, pi_model="pi4")
+
+        manager.update_cmdline_for_state(
+            serial=serial,
+            state="active",
+            nfs_server="192.168.1.10",
+            nfs_path="/exports/pi/d83add36",
+        )
+
+        cmdline_path = temp_tftp_root / "pi-nodes" / serial / "cmdline.txt"
+        content = cmdline_path.read_text()
+        assert "pureboot.state=active" in content
+        assert "root=/dev/nfs" in content
+        assert "nfsroot=192.168.1.10:/exports/pi/d83add36,vers=4,tcp" in content
+
+    def test_update_cmdline_for_state_kwargs_passed(self, temp_tftp_root):
+        """update_cmdline_for_state passes kwargs to generate method."""
+        from src.pxe.pi_manager import PiManager
+
+        manager = PiManager(
+            firmware_dir=temp_tftp_root / "rpi-firmware",
+            deploy_dir=temp_tftp_root / "deploy-arm64",
+            nodes_dir=temp_tftp_root / "pi-nodes",
+        )
+
+        serial = "d83add36"
+        manager.create_node_directory(serial, pi_model="pi4")
+
+        manager.update_cmdline_for_state(
+            serial=serial,
+            state="installing",
+            controller_url="http://pureboot.local:8080",
+            image_url="http://pureboot.local/images/ubuntu.img",
+            target_device="/dev/mmcblk0",
+            node_id="node-123",
+            mac="dc:a6:32:aa:bb:cc",
+            callback_url="http://pureboot.local/api/v1/callback",
+        )
+
+        cmdline_path = temp_tftp_root / "pi-nodes" / serial / "cmdline.txt"
+        content = cmdline_path.read_text()
+        assert "pureboot.url=http://pureboot.local:8080" in content
+        assert "pureboot.image_url=http://pureboot.local/images/ubuntu.img" in content
+        assert "pureboot.target=/dev/mmcblk0" in content
+        assert "pureboot.node_id=node-123" in content
+        assert "pureboot.mac=dc:a6:32:aa:bb:cc" in content
+        assert "pureboot.callback=http://pureboot.local/api/v1/callback" in content

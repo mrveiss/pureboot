@@ -406,3 +406,136 @@ class PiManager:
         config_path = node_dir / "config.txt"
         config_path.write_text(config_txt)
         logger.info(f"Updated config.txt for node: {serial}")
+
+    def generate_cmdline_for_state(
+        self,
+        serial: str,
+        state: str,
+        controller_url: Optional[str] = None,
+        node_id: Optional[str] = None,
+        mac: Optional[str] = None,
+        image_url: Optional[str] = None,
+        target_device: Optional[str] = None,
+        callback_url: Optional[str] = None,
+        nfs_server: Optional[str] = None,
+        nfs_path: Optional[str] = None,
+    ) -> str:
+        """Generate state-aware cmdline.txt content for a Pi node.
+
+        This method generates kernel command line parameters based on the node's
+        current state in the PureBoot lifecycle. Different states require
+        different boot configurations (e.g., installing state needs image URL
+        and target device, NFS boot needs server/path).
+
+        Args:
+            serial: Pi serial number (8 hex chars).
+            state: Current PureBoot node state (e.g., 'discovered', 'installing').
+            controller_url: PureBoot controller URL for callbacks.
+            node_id: Node ID in PureBoot database.
+            mac: MAC address of the Pi.
+            image_url: URL to the OS image for installation.
+            target_device: Target device for installation (e.g., /dev/mmcblk0).
+            callback_url: URL for installation progress callbacks.
+            nfs_server: NFS server IP for NFS root boot.
+            nfs_path: NFS export path for NFS root boot.
+
+        Returns:
+            cmdline.txt content as string (single line ending with newline).
+
+        Raises:
+            ValueError: If serial number is invalid.
+        """
+        serial = self._validate_serial(serial)
+
+        params = [
+            # Console on serial UART
+            "console=serial0,115200",
+            "console=tty1",
+            # Network configuration via DHCP
+            "ip=dhcp",
+            # PureBoot parameters
+            f"pureboot.serial={serial}",
+            f"pureboot.state={state}",
+        ]
+
+        # Add controller URL if provided
+        if controller_url:
+            params.append(f"pureboot.url={controller_url}")
+
+        # Handle installing state with install mode parameters
+        if state == "installing" and image_url:
+            params.extend([
+                "pureboot.mode=install",
+                f"pureboot.image_url={image_url}",
+            ])
+            if target_device:
+                params.append(f"pureboot.target={target_device}")
+            if node_id:
+                params.append(f"pureboot.node_id={node_id}")
+            if mac:
+                params.append(f"pureboot.mac={mac}")
+            if callback_url:
+                params.append(f"pureboot.callback={callback_url}")
+            # Install mode uses ramfs
+            params.extend([
+                "root=/dev/ram0",
+                "rootfstype=ramfs",
+            ])
+        elif nfs_server and nfs_path:
+            # NFS root boot
+            params.extend([
+                "root=/dev/nfs",
+                f"nfsroot={nfs_server}:{nfs_path},vers=4,tcp",
+                "rw",
+            ])
+        else:
+            # Default: ramfs root
+            params.extend([
+                "root=/dev/ram0",
+                "rootfstype=ramfs",
+            ])
+
+        # Boot quietly but show errors
+        params.extend([
+            "quiet",
+            "loglevel=4",
+        ])
+
+        return " ".join(params) + "\n"
+
+    def update_cmdline_for_state(
+        self,
+        serial: str,
+        state: str,
+        **kwargs,
+    ) -> None:
+        """Update cmdline.txt for an existing node based on state.
+
+        Generates state-aware kernel command line parameters and writes
+        them to the node's cmdline.txt file.
+
+        Args:
+            serial: Pi serial number (8 hex chars).
+            state: Current PureBoot node state.
+            **kwargs: Additional parameters passed to generate_cmdline_for_state().
+                Supported: controller_url, node_id, mac, image_url,
+                target_device, callback_url, nfs_server, nfs_path.
+
+        Raises:
+            ValueError: If serial number is invalid.
+            FileNotFoundError: If node directory doesn't exist.
+        """
+        serial = self._validate_serial(serial)
+        node_dir = self.nodes_dir / serial
+
+        if not node_dir.exists():
+            raise FileNotFoundError(f"Node directory not found: {serial}")
+
+        cmdline_txt = self.generate_cmdline_for_state(
+            serial=serial,
+            state=state,
+            **kwargs,
+        )
+        cmdline_path = node_dir / "cmdline.txt"
+        cmdline_path.write_text(cmdline_txt)
+        logger.info(f"Updated cmdline.txt for node {serial} with state: {state}")
