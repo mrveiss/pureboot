@@ -30,6 +30,7 @@ export const useAuthStore = create<AuthStore>()(
         set({ isLoading: true })
         try {
           const tokens = await authApi.login({ username, password })
+          apiClient.setAccessToken(tokens.access_token)
           set({
             accessToken: tokens.access_token,
             isAuthenticated: true,
@@ -53,6 +54,7 @@ export const useAuthStore = create<AuthStore>()(
         try {
           // Refresh token is in httpOnly cookie, no need to pass it
           const tokens = await authApi.refresh()
+          apiClient.setAccessToken(tokens.access_token)
           set({
             accessToken: tokens.access_token,
           })
