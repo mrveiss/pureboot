@@ -344,6 +344,10 @@ Connect to `/api/v1/ws` for real-time updates:
 - `install.progress` - Installation progress update
 - `approval.requested` - New approval request
 - `approval.resolved` - Approval approved/rejected
+- `health:alert_created` - New health alert triggered
+- `health:alert_resolved` - Health alert auto-resolved
+- `health:status_changed` - Node health status changed
+- `health:summary_updated` - Health summary counts updated
 
 ## Rate Limits
 
