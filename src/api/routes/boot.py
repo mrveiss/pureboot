@@ -162,9 +162,9 @@ exit
         image_url = workflow.image_url
         if not image_url:
             return generate_workflow_error_script(node, "image method requires image_url")
-        grub_efi = f"{server}/tftp/uefi/grubx64.efi"
-        deploy_kernel = f"{server}/tftp/deploy/vmlinuz-virt"
-        deploy_initrd = f"{server}/tftp/deploy/initramfs-virt"
+        grub_efi = f"{server}/api/v1/files/tftp/uefi/grubx64.efi"
+        deploy_kernel = f"{server}/api/v1/files/tftp/deploy/vmlinuz-virt"
+        deploy_initrd = f"{server}/api/v1/files/tftp/deploy/initramfs-virt"
         # iPXE EFI cannot boot Linux bzImage kernels directly (Exec format error)
         # Solution: Chain to GRUB EFI which CAN boot Linux kernels
         boot_commands = f"""echo Image-based deployment
@@ -188,9 +188,9 @@ shell
     elif workflow.install_method == "clone":
         # Clone mode: this node serves its disk as source for other nodes
         # Boots into deploy environment and runs disk server
-        deploy_kernel = f"{server}/tftp/deploy/vmlinuz-virt"
-        deploy_initrd = f"{server}/tftp/deploy/initramfs-virt"
-        grub_efi = f"{server}/tftp/uefi/grubx64.efi"
+        deploy_kernel = f"{server}/api/v1/files/tftp/deploy/vmlinuz-virt"
+        deploy_initrd = f"{server}/api/v1/files/tftp/deploy/initramfs-virt"
+        grub_efi = f"{server}/api/v1/files/tftp/uefi/grubx64.efi"
         # Pass clone server parameters via kernel cmdline
         deploy_cmdline = (
             f"ip=dhcp "
@@ -256,8 +256,8 @@ shell
 """
     else:
         # Default: kernel/initrd boot
-        kernel_url = f"{server}{workflow.kernel_path}"
-        initrd_url = f"{server}{workflow.initrd_path}"
+        kernel_url = f"{server}/api/v1/files{workflow.kernel_path}"
+        initrd_url = f"{server}/api/v1/files{workflow.initrd_path}"
         boot_commands = f"""echo Loading kernel...
 kernel {kernel_url} {workflow.cmdline} || goto error
 echo Loading initrd...
@@ -531,8 +531,8 @@ menuentry "Error: Workflow not found" {{
 """
 
     # Generate GRUB config based on workflow
-    deploy_kernel = f"{server}/tftp/deploy/vmlinuz-virt"
-    deploy_initrd = f"{server}/tftp/deploy/initramfs-virt"
+    deploy_kernel = f"{server}/api/v1/files/tftp/deploy/vmlinuz-virt"
+    deploy_initrd = f"{server}/api/v1/files/tftp/deploy/initramfs-virt"
 
     if workflow.install_method == "clone":
         cmdline = (
@@ -560,8 +560,8 @@ menuentry "Error: Workflow not found" {{
         title = f"PureBoot Image Deploy - {node.mac_address}"
     else:
         # Default kernel boot
-        deploy_kernel = f"{server}{workflow.kernel_path}"
-        deploy_initrd = f"{server}{workflow.initrd_path}"
+        deploy_kernel = f"{server}/api/v1/files{workflow.kernel_path}"
+        deploy_initrd = f"{server}/api/v1/files{workflow.initrd_path}"
         cmdline = workflow.cmdline or ""
         title = f"PureBoot Install - {workflow.name}"
 
