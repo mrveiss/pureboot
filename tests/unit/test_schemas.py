@@ -355,6 +355,24 @@ class TestPiRegisterRequest:
         )
         assert request.model == "pi5"
 
+    def test_valid_model_pi3bplus(self):
+        """Pi 3B+ model is accepted."""
+        request = PiRegisterRequest(
+            serial="d83add36",
+            mac="dc:a6:32:12:34:56",
+            model="pi3b+",
+        )
+        assert request.model == "pi3b+"
+
+    def test_valid_model_cm3(self):
+        """Compute Module 3 model is accepted."""
+        request = PiRegisterRequest(
+            serial="d83add36",
+            mac="dc:a6:32:12:34:56",
+            model="cm3",
+        )
+        assert request.model == "cm3"
+
     def test_invalid_model_rejected(self):
         """Invalid model is rejected."""
         with pytest.raises(ValidationError) as exc_info:

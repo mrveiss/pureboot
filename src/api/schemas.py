@@ -297,7 +297,7 @@ class PiRegisterRequest(BaseModel):
     model: str = Field(
         "pi4",
         description="Raspberry Pi model identifier",
-        examples=["pi3", "pi4", "pi5"],
+        examples=["pi3", "pi3b+", "cm3", "pi4", "pi5"],
     )
     ip_address: str | None = Field(
         None,
@@ -332,7 +332,7 @@ class PiRegisterRequest(BaseModel):
     @classmethod
     def validate_model(cls, v: str) -> str:
         """Validate Pi model identifier."""
-        valid_models = {"pi3", "pi4", "pi5"}
+        valid_models = {"pi3", "pi3b+", "cm3", "pi4", "pi5"}
         if v not in valid_models:
             raise ValueError(
                 f"Invalid Pi model: {v}. Must be one of {sorted(valid_models)}"

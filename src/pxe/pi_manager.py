@@ -20,21 +20,41 @@ logger = logging.getLogger(__name__)
 SERIAL_PATTERN = re.compile(r"^[0-9a-f]{8}$")
 
 # Pi model configurations
+# Note: Pi 3 requires bootcode.bin from TFTP (Pi 4/5 have it in EEPROM)
+# Pi 3B requires OTP programming for network boot; Pi 3B+ has it enabled by default
 PI_MODELS = {
+    "pi3": {
+        # Pi 3B - requires bootcode.bin from TFTP and OTP programming for network boot
+        "firmware_files": ["bootcode.bin", "start.elf", "fixup.dat"],
+        "dtb": "bcm2710-rpi-3-b.dtb",
+        "arm_64bit": True,
+        "requires_otp": True,  # Pi 3B needs OTP programming for USB/network boot
+    },
+    "pi3b+": {
+        # Pi 3B+ - network boot enabled by default in ROM
+        "firmware_files": ["bootcode.bin", "start.elf", "fixup.dat"],
+        "dtb": "bcm2710-rpi-3-b-plus.dtb",
+        "arm_64bit": True,
+        "requires_otp": False,  # Pi 3B+ has network boot enabled by default
+    },
+    "cm3": {
+        # Compute Module 3
+        "firmware_files": ["bootcode.bin", "start.elf", "fixup.dat"],
+        "dtb": "bcm2710-rpi-cm3.dtb",
+        "arm_64bit": True,
+        "requires_otp": True,
+    },
     "pi4": {
         "firmware_files": ["start4.elf", "fixup4.dat"],
         "dtb": "bcm2711-rpi-4-b.dtb",
         "arm_64bit": True,
-    },
-    "pi3": {
-        "firmware_files": ["start.elf", "fixup.dat"],
-        "dtb": "bcm2710-rpi-3-b.dtb",
-        "arm_64bit": True,
+        "requires_otp": False,  # Pi 4 has network boot in EEPROM
     },
     "pi5": {
         "firmware_files": ["start4.elf", "fixup4.dat"],
         "dtb": "bcm2712-rpi-5-b.dtb",
         "arm_64bit": True,
+        "requires_otp": False,  # Pi 5 has network boot in EEPROM
     },
 }
 
@@ -155,7 +175,7 @@ class PiManager:
 
         Args:
             serial: Pi serial number (8 hex chars).
-            pi_model: Pi model (pi3, pi4, pi5). Defaults to "pi4".
+            pi_model: Pi model (pi3, pi3b+, cm3, pi4, pi5). Defaults to "pi4".
             controller_url: PureBoot controller URL for cmdline.txt.
 
         Returns:
@@ -251,7 +271,7 @@ class PiManager:
 
         Args:
             serial: Pi serial number (8 hex chars).
-            pi_model: Pi model (pi3, pi4, pi5). Defaults to "pi4".
+            pi_model: Pi model (pi3, pi3b+, cm3, pi4, pi5). Defaults to "pi4".
 
         Returns:
             config.txt content as string.
@@ -391,7 +411,7 @@ class PiManager:
 
         Args:
             serial: Pi serial number (8 hex chars).
-            pi_model: Pi model (pi3, pi4, pi5).
+            pi_model: Pi model (pi3, pi3b+, cm3, pi4, pi5).
 
         Raises:
             FileNotFoundError: If node directory doesn't exist.

@@ -515,6 +515,200 @@ class TestGenerateCmdlineForState:
             )
 
 
+class TestPi3Support:
+    """Tests for Raspberry Pi 3 specific support."""
+
+    @pytest.fixture
+    def temp_tftp_root_pi3(self):
+        """Create temporary TFTP root directory with Pi 3 firmware files."""
+        root = Path(tempfile.mkdtemp())
+        # Create firmware directory with Pi 3 specific files
+        firmware_dir = root / "rpi-firmware"
+        firmware_dir.mkdir(parents=True)
+        # Pi 3 requires bootcode.bin (Pi 4/5 have it in EEPROM)
+        (firmware_dir / "bootcode.bin").touch()
+        (firmware_dir / "start.elf").touch()
+        (firmware_dir / "fixup.dat").touch()
+        # Pi 3B DTB
+        (firmware_dir / "bcm2710-rpi-3-b.dtb").touch()
+        # Pi 3B+ DTB
+        (firmware_dir / "bcm2710-rpi-3-b-plus.dtb").touch()
+        # CM3 DTB
+        (firmware_dir / "bcm2710-rpi-cm3.dtb").touch()
+        # Also add Pi 4/5 firmware for comparison tests
+        (firmware_dir / "start4.elf").touch()
+        (firmware_dir / "fixup4.dat").touch()
+        (firmware_dir / "bcm2711-rpi-4-b.dtb").touch()
+        (firmware_dir / "bcm2712-rpi-5-b.dtb").touch()
+
+        # Create deploy directory
+        deploy_dir = root / "deploy-arm64"
+        deploy_dir.mkdir(parents=True)
+        (deploy_dir / "kernel8.img").touch()
+        (deploy_dir / "initramfs.img").touch()
+
+        # Create nodes directory
+        (root / "pi-nodes").mkdir(parents=True)
+
+        yield root
+        shutil.rmtree(root)
+
+    def test_pi3_requires_bootcode_bin(self, temp_tftp_root_pi3):
+        """Pi 3 node directory must include bootcode.bin symlink."""
+        from src.pxe.pi_manager import PiManager
+
+        manager = PiManager(
+            firmware_dir=temp_tftp_root_pi3 / "rpi-firmware",
+            deploy_dir=temp_tftp_root_pi3 / "deploy-arm64",
+            nodes_dir=temp_tftp_root_pi3 / "pi-nodes",
+        )
+
+        serial = "d83add36"
+        node_dir = manager.create_node_directory(serial, pi_model="pi3")
+
+        # Pi 3 MUST have bootcode.bin (unlike Pi 4/5)
+        bootcode_link = node_dir / "bootcode.bin"
+        assert bootcode_link.exists(), "Pi 3 requires bootcode.bin"
+        assert bootcode_link.is_symlink()
+        assert bootcode_link.resolve() == (temp_tftp_root_pi3 / "rpi-firmware" / "bootcode.bin").resolve()
+
+    def test_pi3_uses_start_elf_not_start4(self, temp_tftp_root_pi3):
+        """Pi 3 uses start.elf, not start4.elf."""
+        from src.pxe.pi_manager import PiManager
+
+        manager = PiManager(
+            firmware_dir=temp_tftp_root_pi3 / "rpi-firmware",
+            deploy_dir=temp_tftp_root_pi3 / "deploy-arm64",
+            nodes_dir=temp_tftp_root_pi3 / "pi-nodes",
+        )
+
+        serial = "d83add36"
+        node_dir = manager.create_node_directory(serial, pi_model="pi3")
+
+        # Pi 3 uses start.elf (not start4.elf)
+        start_link = node_dir / "start.elf"
+        assert start_link.exists(), "Pi 3 should have start.elf"
+        assert start_link.is_symlink()
+
+        # Pi 3 should NOT have start4.elf
+        start4_link = node_dir / "start4.elf"
+        assert not start4_link.exists(), "Pi 3 should not have start4.elf"
+
+    def test_pi3_config_uses_correct_dtb(self, temp_tftp_root_pi3):
+        """Pi 3 config.txt references bcm2710-rpi-3-b.dtb."""
+        from src.pxe.pi_manager import PiManager
+
+        manager = PiManager(
+            firmware_dir=temp_tftp_root_pi3 / "rpi-firmware",
+            deploy_dir=temp_tftp_root_pi3 / "deploy-arm64",
+            nodes_dir=temp_tftp_root_pi3 / "pi-nodes",
+        )
+
+        config = manager.generate_config_txt(
+            serial="d83add36",
+            pi_model="pi3",
+        )
+
+        assert "device_tree=bcm2710-rpi-3-b.dtb" in config
+
+    def test_pi3bplus_uses_correct_dtb(self, temp_tftp_root_pi3):
+        """Pi 3B+ config.txt references bcm2710-rpi-3-b-plus.dtb."""
+        from src.pxe.pi_manager import PiManager
+
+        manager = PiManager(
+            firmware_dir=temp_tftp_root_pi3 / "rpi-firmware",
+            deploy_dir=temp_tftp_root_pi3 / "deploy-arm64",
+            nodes_dir=temp_tftp_root_pi3 / "pi-nodes",
+        )
+
+        config = manager.generate_config_txt(
+            serial="d83add36",
+            pi_model="pi3b+",
+        )
+
+        assert "device_tree=bcm2710-rpi-3-b-plus.dtb" in config
+
+    def test_pi3bplus_has_bootcode_bin(self, temp_tftp_root_pi3):
+        """Pi 3B+ also requires bootcode.bin from TFTP."""
+        from src.pxe.pi_manager import PiManager
+
+        manager = PiManager(
+            firmware_dir=temp_tftp_root_pi3 / "rpi-firmware",
+            deploy_dir=temp_tftp_root_pi3 / "deploy-arm64",
+            nodes_dir=temp_tftp_root_pi3 / "pi-nodes",
+        )
+
+        serial = "d83add36"
+        node_dir = manager.create_node_directory(serial, pi_model="pi3b+")
+
+        bootcode_link = node_dir / "bootcode.bin"
+        assert bootcode_link.exists(), "Pi 3B+ requires bootcode.bin"
+        assert bootcode_link.is_symlink()
+
+    def test_cm3_support(self, temp_tftp_root_pi3):
+        """Compute Module 3 is supported."""
+        from src.pxe.pi_manager import PiManager
+
+        manager = PiManager(
+            firmware_dir=temp_tftp_root_pi3 / "rpi-firmware",
+            deploy_dir=temp_tftp_root_pi3 / "deploy-arm64",
+            nodes_dir=temp_tftp_root_pi3 / "pi-nodes",
+        )
+
+        serial = "d83add36"
+        node_dir = manager.create_node_directory(serial, pi_model="cm3")
+
+        # CM3 should have bootcode.bin
+        assert (node_dir / "bootcode.bin").exists()
+        # CM3 should have correct DTB referenced in config
+        config = manager.generate_config_txt(serial, pi_model="cm3")
+        assert "device_tree=bcm2710-rpi-cm3.dtb" in config
+
+    def test_pi4_does_not_need_bootcode_bin(self, temp_tftp_root_pi3):
+        """Pi 4 does not need bootcode.bin (has it in EEPROM)."""
+        from src.pxe.pi_manager import PiManager
+
+        manager = PiManager(
+            firmware_dir=temp_tftp_root_pi3 / "rpi-firmware",
+            deploy_dir=temp_tftp_root_pi3 / "deploy-arm64",
+            nodes_dir=temp_tftp_root_pi3 / "pi-nodes",
+        )
+
+        serial = "d83add36"
+        node_dir = manager.create_node_directory(serial, pi_model="pi4")
+
+        # Pi 4 should NOT have bootcode.bin (it's in EEPROM)
+        bootcode_link = node_dir / "bootcode.bin"
+        assert not bootcode_link.exists(), "Pi 4 should not need bootcode.bin"
+
+        # Pi 4 should have start4.elf instead
+        assert (node_dir / "start4.elf").exists()
+
+    def test_pi3_model_config_has_requires_otp_flag(self, temp_tftp_root_pi3):
+        """Pi 3 model config includes requires_otp flag."""
+        from src.pxe.pi_manager import PI_MODELS
+
+        # Pi 3B requires OTP programming for network boot
+        assert PI_MODELS["pi3"]["requires_otp"] is True
+
+        # Pi 3B+ has network boot enabled by default
+        assert PI_MODELS["pi3b+"]["requires_otp"] is False
+
+        # Pi 4/5 don't need OTP (bootcode in EEPROM)
+        assert PI_MODELS["pi4"]["requires_otp"] is False
+        assert PI_MODELS["pi5"]["requires_otp"] is False
+
+    def test_all_pi3_models_use_same_firmware(self, temp_tftp_root_pi3):
+        """All Pi 3 variants use the same firmware files."""
+        from src.pxe.pi_manager import PI_MODELS
+
+        pi3_firmware = ["bootcode.bin", "start.elf", "fixup.dat"]
+
+        assert PI_MODELS["pi3"]["firmware_files"] == pi3_firmware
+        assert PI_MODELS["pi3b+"]["firmware_files"] == pi3_firmware
+        assert PI_MODELS["cm3"]["firmware_files"] == pi3_firmware
+
+
 class TestUpdateCmdlineForState:
     """Tests for update_cmdline_for_state() method."""
 
