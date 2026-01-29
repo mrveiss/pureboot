@@ -28,6 +28,7 @@ from src.api.routes.ldap import router as ldap_router
 from src.api.routes.clone import router as clone_router
 from src.api.routes.disks import router as disks_router
 from src.api.routes.callbacks import router as callbacks_router
+from src.api.routes.boot_files import router as boot_files_router
 from src.api.routes.health import router as health_router
 from src.api.middleware.auth import AuthMiddleware
 from src.core.ca import ca_service
@@ -519,6 +520,7 @@ app.include_router(ldap_router, prefix="/api/v1", tags=["ldap"])
 app.include_router(clone_router, prefix="/api/v1", tags=["clone-sessions"])
 app.include_router(disks_router, prefix="/api/v1", tags=["disks"])
 app.include_router(callbacks_router, prefix="/api/v1", tags=["callbacks"])
+app.include_router(boot_files_router, prefix="/api/v1", tags=["boot-files"])
 app.include_router(health_router, prefix="/api/v1", tags=["health"])
 
 # Static assets directory

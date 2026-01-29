@@ -1181,6 +1181,7 @@ class StorageFile(BaseModel):
     mime_type: str | None = None
     modified_at: datetime | None = None
     item_count: int | None = None  # For directories
+    checksum_sha256: str | None = None  # SHA256 checksum (for files)
 
 
 class FileListResponse(BaseModel):

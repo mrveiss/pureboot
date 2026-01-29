@@ -1,6 +1,8 @@
 """File browser API endpoints."""
+import hashlib
 import json
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Header
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +17,7 @@ from src.api.schemas import (
 )
 from src.core.storage import get_backend_service
 from src.db.database import get_db
-from src.db.models import StorageBackend
+from src.db.models import FileChecksum, StorageBackend
 
 router = APIRouter()
 
@@ -108,20 +110,73 @@ async def upload_file(
     backend_id: str,
     path: str = Query(default="/", description="Directory path to upload to"),
     file: UploadFile = File(...),
+    expected_checksum: str | None = Header(
+        default=None,
+        alias="X-Expected-Checksum-SHA256",
+        description="Expected SHA256 checksum for verification",
+    ),
     db: AsyncSession = Depends(get_db),
 ):
-    """Upload a file to storage backend."""
+    """
+    Upload a file to storage backend.
+
+    Computes SHA256 checksum during upload and stores it for later retrieval.
+    If X-Expected-Checksum-SHA256 header is provided, verifies the checksum
+    matches (returns 422 on mismatch).
+    """
     backend, service = await get_backend_and_service(backend_id, db)
 
     if not service.supports_write():
         raise HTTPException(status_code=400, detail="Backend is read-only")
 
     try:
+        # Read entire file content to compute checksum
+        content = await file.read()
+        computed_checksum = hashlib.sha256(content).hexdigest()
+        file_size = len(content)
+
+        # Verify checksum if expected
+        if expected_checksum and computed_checksum != expected_checksum.lower():
+            raise HTTPException(
+                status_code=422,
+                detail=f"Checksum mismatch: expected {expected_checksum}, got {computed_checksum}",
+            )
+
+        # Create iterator from content for upload
         async def content_iterator():
-            while chunk := await file.read(8192):
-                yield chunk
+            chunk_size = 8192
+            for i in range(0, len(content), chunk_size):
+                yield content[i : i + chunk_size]
 
         result = await service.upload_file(path, file.filename, content_iterator())
+
+        # Normalize file path for checksum storage
+        file_path = path.rstrip("/") + "/" + file.filename
+        if not file_path.startswith("/"):
+            file_path = "/" + file_path
+
+        # Store/update checksum record
+        checksum_result = await db.execute(
+            select(FileChecksum).where(
+                FileChecksum.backend_id == backend_id,
+                FileChecksum.file_path == file_path,
+            )
+        )
+        checksum_record = checksum_result.scalar_one_or_none()
+
+        if checksum_record:
+            checksum_record.checksum_sha256 = computed_checksum
+            checksum_record.size_bytes = file_size
+        else:
+            checksum_record = FileChecksum(
+                backend_id=backend_id,
+                file_path=file_path,
+                checksum_sha256=computed_checksum,
+                size_bytes=file_size,
+            )
+            db.add(checksum_record)
+
+        await db.commit()
 
         return ApiResponse(
             data=StorageFile(
@@ -132,6 +187,7 @@ async def upload_file(
                 mime_type=result.mime_type,
                 modified_at=result.modified_at,
                 item_count=result.item_count,
+                checksum_sha256=computed_checksum,
             ),
             message="File uploaded successfully",
         )

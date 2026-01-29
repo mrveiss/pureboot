@@ -51,16 +51,17 @@ class TestBootScriptGeneration:
         workflow = Workflow(
             id="ubuntu-2404",
             name="Ubuntu 24.04",
-            kernel_path="/files/ubuntu/vmlinuz",
-            initrd_path="/files/ubuntu/initrd",
+            kernel_path="/ubuntu/vmlinuz",
+            initrd_path="/ubuntu/initrd",
             cmdline="ip=dhcp",
         )
 
         script = generate_install_script(node, workflow, "http://server:8080")
 
         assert "#!ipxe" in script
-        assert "kernel http://server:8080/files/ubuntu/vmlinuz" in script
-        assert "initrd http://server:8080/files/ubuntu/initrd" in script
+        # Kernel/initrd URLs use the /api/v1/files endpoint for serving
+        assert "kernel http://server:8080/api/v1/files/ubuntu/vmlinuz" in script
+        assert "initrd http://server:8080/api/v1/files/ubuntu/initrd" in script
         assert "ip=dhcp" in script
         assert "boot" in script
 
@@ -69,11 +70,11 @@ class TestBootScriptGeneration:
         node = MagicMock()
         node.mac_address = "aa:bb:cc:dd:ee:ff"
 
-        script = generate_pending_no_workflow_script(node)
+        script = generate_pending_no_workflow_script(node, "http://server:8080")
 
         assert "#!ipxe" in script
-        assert "no workflow" in script.lower()
-        assert "exit" in script
+        assert "awaiting workflow" in script.lower()
+        assert "chain" in script  # Uses chain to poll for workflow
 
     def test_workflow_error_script(self):
         """Workflow error script shows error message."""
