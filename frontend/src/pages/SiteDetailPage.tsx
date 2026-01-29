@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   Globe,
   Users,
-  Settings,
   Wifi,
   AlertTriangle,
   Key,

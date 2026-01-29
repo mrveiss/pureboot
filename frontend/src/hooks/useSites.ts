@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { sitesApi } from '@/api'
-import type { Site, SiteCreate, SiteUpdate } from '@/types/site'
+import type { SiteCreate, SiteUpdate } from '@/types/site'
 
 export const siteKeys = {
   all: ['sites'] as const,

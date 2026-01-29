@@ -12,6 +12,7 @@ from src.core.state_service import StateTransitionService
 from src.core.workflow_service import Workflow, WorkflowNotFoundError, WorkflowService
 from src.db.database import get_db
 from src.db.models import Node
+from src.utils.network import get_server_url
 
 router = APIRouter()
 
@@ -388,7 +389,7 @@ async def get_boot_script(
     """
     mac = validate_mac(mac)
     client_ip = request.client.host if request.client else None
-    server = f"http://{settings.host}:{settings.port}"
+    server = get_server_url()
 
     # Look up node by MAC
     result = await db.execute(select(Node).where(Node.mac_address == mac))
@@ -494,7 +495,7 @@ async def get_grub_config(
     to get node-specific kernel parameters.
     """
     mac = validate_mac(mac)
-    server = f"http://{settings.host}:{settings.port}"
+    server = get_server_url()
 
     # Look up node by MAC
     result = await db.execute(select(Node).where(Node.mac_address == mac))
@@ -597,7 +598,7 @@ async def get_boot_status(
     - Sleeps and re-polls if still waiting for workflow
     """
     mac = validate_mac(mac)
-    server = f"http://{settings.host}:{settings.port}"
+    server = get_server_url()
     short_id = mac.replace(":", "")[-6:].upper()
 
     # Look up node by MAC

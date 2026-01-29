@@ -1,10 +1,5 @@
 import { useState, useMemo } from 'react'
-import { AlertTriangle, Check, Filter } from 'lucide-react'
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
   Button,
   Badge,
   Dialog,

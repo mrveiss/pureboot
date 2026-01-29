@@ -31,8 +31,10 @@ from src.api.schemas import (
     TagCreate,
 )
 from src.core.event_service import EventService
+from src.core.health_service import HealthService
 from src.core.state_machine import InvalidStateTransition, NodeStateMachine
 from src.core.state_service import StateTransitionService
+from src.core.websocket import global_ws_manager
 from src.db.database import get_db
 from src.db.models import DeviceGroup, Node, NodeEvent, NodeStateLog, NodeTag
 
@@ -608,6 +610,11 @@ async def report_node_status(
     # Update node information
     node.last_seen_at = datetime.now(timezone.utc)
 
+    # Track IP address changes
+    if report.ip_address and node.ip_address != report.ip_address:
+        node.previous_ip_address = node.ip_address
+        node.last_ip_change_at = datetime.now(timezone.utc)
+
     if report.ip_address:
         node.ip_address = report.ip_address
     if report.hostname:
@@ -630,6 +637,27 @@ async def report_node_status(
     # Handle legacy installation_status (backwards compatibility)
     elif report.installation_status:
         message = await _handle_legacy_installation_status(db, node, report, client_ip)
+
+    # Update health status
+    old_status = node.health_status
+    new_status, new_score = await HealthService.update_node_health(db, node)
+
+    # Auto-resolve alerts if node is now healthy
+    if new_status == "healthy":
+        await HealthService.resolve_alert(db, node.id, "node_stale")
+        await HealthService.resolve_alert(db, node.id, "node_offline")
+
+    # Broadcast health status change
+    if old_status != new_status:
+        await global_ws_manager.broadcast(
+            "health:status_changed",
+            {
+                "node_id": node.id,
+                "old_status": old_status,
+                "new_status": new_status,
+                "health_score": new_score,
+            },
+        )
 
     await db.flush()
     await db.refresh(node)
@@ -703,6 +731,8 @@ async def _handle_event(
     # Handle state transitions based on event
     match event_type:
         case "boot_started":
+            node.boot_count = (node.boot_count or 0) + 1
+            node.last_boot_at = datetime.now(timezone.utc)
             message = "Boot started event logged"
 
         case "install_started":

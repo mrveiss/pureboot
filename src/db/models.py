@@ -125,6 +125,17 @@ class Node(Base):
     # Metadata
     arch: Mapped[str] = mapped_column(String(10), default="x86_64")
     boot_mode: Mapped[str] = mapped_column(String(4), default="bios")
+
+    # Health monitoring
+    health_status: Mapped[str] = mapped_column(
+        String(20), default="unknown", index=True
+    )  # healthy, stale, offline, unknown
+    health_score: Mapped[int] = mapped_column(default=100)  # 0-100
+    boot_count: Mapped[int] = mapped_column(default=0)
+    last_boot_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_ip_change_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    previous_ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+
     pi_model: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     # Relationships
@@ -229,6 +240,66 @@ class NodeEvent(Base):
 
     # Relationship
     node: Mapped["Node"] = relationship(back_populates="events")
+
+
+class NodeHealthSnapshot(Base):
+    """Point-in-time health snapshot for trend tracking."""
+
+    __tablename__ = "node_health_snapshots"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    timestamp: Mapped[datetime] = mapped_column(default=func.now(), index=True)
+    health_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    health_score: Mapped[int] = mapped_column(nullable=False)
+    last_seen_seconds_ago: Mapped[int] = mapped_column(nullable=False)
+    boot_count: Mapped[int] = mapped_column(default=0)
+    install_attempts: Mapped[int] = mapped_column(default=0)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+
+    # Relationship
+    node: Mapped["Node"] = relationship()
+
+    __table_args__ = (
+        Index("ix_health_snapshot_node_time", "node_id", "timestamp"),
+    )
+
+
+class HealthAlert(Base):
+    """Health alert for node monitoring."""
+
+    __tablename__ = "health_alerts"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    alert_type: Mapped[str] = mapped_column(
+        String(30), nullable=False, index=True
+    )  # node_stale, node_offline, low_health_score, install_timeout
+    severity: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # warning, critical
+    status: Mapped[str] = mapped_column(
+        String(20), default="active", index=True
+    )  # active, acknowledged, resolved
+
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    acknowledged_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    acknowledged_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    # Relationship
+    node: Mapped["Node"] = relationship()
 
 
 class NodeTag(Base):

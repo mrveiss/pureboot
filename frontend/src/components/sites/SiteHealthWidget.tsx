@@ -12,7 +12,6 @@ export function SiteHealthWidget() {
   const onlineCount = sites.filter((s) => getSiteStatus(s) === 'online').length
   const offlineCount = sites.filter((s) => getSiteStatus(s) === 'offline').length
   const degradedCount = sites.filter((s) => getSiteStatus(s) === 'degraded').length
-  const problemCount = offlineCount + degradedCount
 
   if (totalSites === 0 && !isLoading) {
     return null // Don't show widget if no sites exist

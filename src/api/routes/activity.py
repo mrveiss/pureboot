@@ -9,7 +9,7 @@ from sqlalchemy import func, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.database import get_db
-from src.db.models import Node, NodeEvent, NodeStateLog
+from src.db.models import Node, NodeEvent, NodeStateLog, HealthAlert
 
 router = APIRouter()
 
@@ -18,7 +18,7 @@ class ActivityEntry(BaseModel):
     """Single activity entry."""
     id: str
     timestamp: datetime
-    type: str  # state_change, node_event
+    type: str  # state_change, node_event, health_alert
     category: str  # The specific event type or state transition
     node_id: str | None
     node_name: str | None
@@ -37,7 +37,7 @@ class ActivityListResponse(BaseModel):
 async def get_activity(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    type: Literal["state_change", "node_event"] | None = Query(None, description="Filter by activity type"),
+    type: Literal["state_change", "node_event", "health_alert"] | None = Query(None, description="Filter by activity type"),
     node_id: str | None = Query(None, description="Filter by node ID"),
     event_type: str | None = Query(None, description="Filter by event type (for node_event)"),
     since: datetime | None = Query(None, description="Filter activities since timestamp"),
@@ -48,6 +48,7 @@ async def get_activity(
     Aggregates NodeEvents and NodeStateLogs into a unified timeline.
     """
     entries: list[ActivityEntry] = []
+    node_names: dict[str, str] = {}
 
     # Build conditions for state logs
     state_conditions = []
@@ -88,7 +89,6 @@ async def get_activity(
 
         # Get node names for state logs
         node_ids = list(set(log.node_id for log in state_logs if log.node_id))
-        node_names: dict[str, str] = {}
         if node_ids:
             nodes_result = await db.execute(
                 select(Node.id, Node.hostname, Node.mac_address).where(Node.id.in_(node_ids))
@@ -187,6 +187,68 @@ async def get_activity(
                 message=msg,
                 details=metadata if metadata else None,
                 triggered_by="node_report",
+            ))
+
+    # Fetch health alerts if not filtering to specific types
+    if type not in ("state_change", "node_event"):
+        alert_conditions = []
+        if node_id:
+            alert_conditions.append(HealthAlert.node_id == node_id)
+        if since:
+            alert_conditions.append(HealthAlert.created_at >= since)
+
+        alert_query = select(
+            HealthAlert.id,
+            HealthAlert.created_at,
+            HealthAlert.node_id,
+            HealthAlert.alert_type,
+            HealthAlert.severity,
+            HealthAlert.status,
+            HealthAlert.message,
+            HealthAlert.details_json,
+        )
+        if alert_conditions:
+            alert_query = alert_query.where(*alert_conditions)
+        alert_query = alert_query.order_by(HealthAlert.created_at.desc())
+
+        alert_result = await db.execute(alert_query)
+        alerts = alert_result.all()
+
+        # Get node names for alerts
+        alert_node_ids = list(set(a.node_id for a in alerts if a.node_id))
+        if alert_node_ids:
+            missing_ids = [nid for nid in alert_node_ids if nid not in node_names]
+            if missing_ids:
+                nodes_result = await db.execute(
+                    select(Node.id, Node.hostname, Node.mac_address).where(
+                        Node.id.in_(missing_ids)
+                    )
+                )
+                for n in nodes_result.all():
+                    node_names[n.id] = n.hostname or n.mac_address
+
+        for alert in alerts:
+            details = None
+            if alert.details_json:
+                try:
+                    details = json.loads(alert.details_json)
+                except json.JSONDecodeError:
+                    pass
+
+            entries.append(ActivityEntry(
+                id=f"alert_{alert.id}",
+                timestamp=alert.created_at,
+                type="health_alert",
+                category=alert.alert_type,
+                node_id=alert.node_id,
+                node_name=node_names.get(alert.node_id) if alert.node_id else None,
+                message=alert.message,
+                details={
+                    **(details or {}),
+                    "severity": alert.severity,
+                    "alert_status": alert.status,
+                },
+                triggered_by="health_monitor",
             ))
 
     # Sort by timestamp descending

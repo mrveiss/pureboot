@@ -25,6 +25,7 @@ from src.db.database import get_db
 from src.db.models import Node
 from src.pxe import PiManager
 from src.pxe.pi_manager import validate_serial
+from src.utils.network import get_server_url, get_primary_ip
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +60,9 @@ async def get_pi_boot_instructions(
         None,
         description="MAC address for auto-registration",
     ),
-    request: Request | None = None,
     db: AsyncSession = Depends(get_db),
+    *,
+    request: Request,
 ) -> PiBootResponse:
     """Get boot instructions for a Raspberry Pi.
 
@@ -98,7 +100,7 @@ async def get_pi_boot_instructions(
 
     # Get client IP
     client_ip = request.client.host if request and request.client else None
-    server = f"http://{settings.host}:{settings.port}"
+    server = get_server_url()
 
     # Look up node by serial number
     result = await db.execute(
@@ -242,10 +244,11 @@ def _get_workflow_response(node: Node, workflow: Workflow, server: str) -> PiBoo
     elif workflow.install_method == "nfs":
         # NFS root boot (diskless)
         # Extract NFS parameters from workflow or use defaults from settings
+        default_nfs_server = get_primary_ip() if settings.host == "0.0.0.0" else settings.host
         nfs_server = (
             workflow.boot_params.get("nfs_server")
             or getattr(workflow, "nfs_server", None)
-            or settings.host
+            or default_nfs_server
         )
         nfs_base_path = (
             workflow.boot_params.get("nfs_path")
@@ -297,7 +300,7 @@ async def register_pi_node(
         request.client.host if request.client else None
     )
 
-    server = f"http://{settings.host}:{settings.port}"
+    server = get_server_url()
 
     # Look up existing node by serial number
     result = await db.execute(

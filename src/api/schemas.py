@@ -190,6 +190,8 @@ class NodeResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_seen_at: datetime | None
+    health_status: str = "unknown"
+    health_score: int = 100
 
     @classmethod
     def from_node(cls, node) -> "NodeResponse":
@@ -216,6 +218,8 @@ class NodeResponse(BaseModel):
             created_at=node.created_at,
             updated_at=node.updated_at,
             last_seen_at=node.last_seen_at,
+            health_status=getattr(node, 'health_status', 'unknown'),
+            health_score=getattr(node, 'health_score', 100),
         )
 
 
@@ -1512,6 +1516,88 @@ class NodeStatsResponse(BaseModel):
     by_state: dict[str, int]
     discovered_last_hour: int
     installing_count: int
+
+
+# ============== Health Monitoring Schemas ==============
+
+
+class HealthSummaryResponse(BaseModel):
+    """Dashboard health summary."""
+
+    total_nodes: int
+    by_status: dict[str, int]  # {healthy: 45, stale: 3, offline: 2, unknown: 1}
+    average_score: float
+    active_alerts: int
+    critical_alerts: int
+
+
+class HealthAlertResponse(BaseModel):
+    """Response for a single health alert."""
+
+    id: str
+    node_id: str
+    node_name: str | None = None
+    alert_type: str
+    severity: str
+    status: str
+    message: str
+    details: dict | None = None
+    created_at: datetime
+    acknowledged_at: datetime | None = None
+    acknowledged_by: str | None = None
+    resolved_at: datetime | None = None
+
+    @classmethod
+    def from_alert(cls, alert, node_name: str | None = None) -> "HealthAlertResponse":
+        """Create response from HealthAlert model."""
+        details = None
+        if alert.details_json:
+            try:
+                details = json.loads(alert.details_json)
+            except json.JSONDecodeError:
+                pass
+        return cls(
+            id=alert.id,
+            node_id=alert.node_id,
+            node_name=node_name,
+            alert_type=alert.alert_type,
+            severity=alert.severity,
+            status=alert.status,
+            message=alert.message,
+            details=details,
+            created_at=alert.created_at,
+            acknowledged_at=alert.acknowledged_at,
+            acknowledged_by=alert.acknowledged_by,
+            resolved_at=alert.resolved_at,
+        )
+
+
+class NodeHealthDetailResponse(BaseModel):
+    """Detailed health for a single node."""
+
+    node_id: str
+    health_status: str
+    health_score: int
+    score_breakdown: dict[str, int]
+    last_seen_at: datetime | None
+    boot_count: int
+    install_attempts: int
+    last_boot_at: datetime | None = None
+    last_ip_change_at: datetime | None = None
+    previous_ip_address: str | None = None
+    active_alerts: list[HealthAlertResponse] = []
+
+
+class HealthSnapshotResponse(BaseModel):
+    """Response for a single health snapshot."""
+
+    timestamp: datetime
+    health_status: str
+    health_score: int
+    last_seen_seconds_ago: int
+    boot_count: int
+    install_attempts: int
+    ip_address: str | None = None
 
 
 # ============== Bulk Operation Schemas ==============

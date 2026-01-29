@@ -2,6 +2,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -28,16 +29,20 @@ from src.api.routes.clone import router as clone_router
 from src.api.routes.disks import router as disks_router
 from src.api.routes.callbacks import router as callbacks_router
 from src.api.routes.boot_files import router as boot_files_router
+from src.api.routes.health import router as health_router
 from src.api.middleware.auth import AuthMiddleware
 from src.core.ca import ca_service
 from src.db.database import init_db, close_db, async_session_factory
 from src.config import settings
 from src.pxe.tftp_server import TFTPServer
 from src.pxe.dhcp_proxy import DHCPProxy
+from sqlalchemy import select
 from src.core.scheduler import sync_scheduler
 from src.core.escalation_job import process_escalations
 from src.core.agent_status_job import update_agent_statuses
+from src.db.models import Node, NodeHealthSnapshot
 from src.services.audit import audit_service
+from src.utils.network import get_primary_ip
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -93,10 +98,17 @@ async def lifespan(app: FastAPI):
 
     # Start Proxy DHCP if enabled
     if settings.dhcp_proxy.enabled:
-        tftp_addr = settings.dhcp_proxy.tftp_server or settings.host
+        # Auto-detect server IP if host is 0.0.0.0 (bind-all)
+        # DHCP proxy needs actual IP to tell clients where to connect
+        server_ip = settings.host
+        if server_ip == "0.0.0.0":
+            server_ip = get_primary_ip()
+            logger.info(f"Auto-detected server IP: {server_ip}")
+
+        tftp_addr = settings.dhcp_proxy.tftp_server or server_ip
         http_addr = (
             settings.dhcp_proxy.http_server
-            or f"{settings.host}:{settings.port}"
+            or f"{server_ip}:{settings.port}"
         )
         dhcp_proxy = DHCPProxy(
             tftp_server=tftp_addr,
@@ -137,6 +149,39 @@ async def lifespan(app: FastAPI):
         replace_existing=True
     )
     logger.info("Agent status update job scheduled (every 1 minute)")
+
+    # Schedule health check job (every minute)
+    sync_scheduler.scheduler.add_job(
+        _health_check_job,
+        'interval',
+        minutes=1,
+        id='health_check',
+        replace_existing=True,
+    )
+    logger.info("Health check job scheduled (every 1 minute)")
+
+    # Schedule health snapshot job
+    sync_scheduler.scheduler.add_job(
+        _health_snapshot_job,
+        'interval',
+        minutes=settings.health.snapshot_interval_minutes,
+        id='health_snapshot',
+        replace_existing=True,
+    )
+    logger.info(
+        f"Health snapshot job scheduled (every {settings.health.snapshot_interval_minutes} minutes)"
+    )
+
+    # Schedule health cleanup job (daily at 3 AM)
+    sync_scheduler.scheduler.add_job(
+        _health_cleanup_job,
+        'cron',
+        hour=3,
+        minute=0,
+        id='health_cleanup',
+        replace_existing=True,
+    )
+    logger.info("Health snapshot cleanup job scheduled (daily at 3:00 AM)")
 
     # Initialize CA service
     ca_service.initialize()
@@ -191,6 +236,92 @@ async def _register_scheduled_jobs():
         logger.info(f"Re-registered {len(jobs)} scheduled sync jobs")
 
 
+async def _health_check_job():
+    """Periodic health check for all nodes."""
+    from src.core.health_service import HealthService
+    from src.core.websocket import global_ws_manager
+
+    if not async_session_factory:
+        return
+
+    async with async_session_factory() as db:
+        try:
+            new_alerts = await HealthService.check_all_nodes(db)
+            await db.commit()
+
+            # Broadcast new alerts via WebSocket
+            for alert in new_alerts:
+                await global_ws_manager.broadcast(
+                    "health:alert_created",
+                    {
+                        "id": alert.id,
+                        "node_id": alert.node_id,
+                        "alert_type": alert.alert_type,
+                        "severity": alert.severity,
+                        "message": alert.message,
+                    },
+                )
+
+            # Broadcast updated summary
+            if new_alerts:
+                async with async_session_factory() as db2:
+                    summary = await HealthService.get_summary(db2)
+                    await global_ws_manager.broadcast(
+                        "health:summary_updated", summary
+                    )
+
+        except Exception:
+            logger.exception("Health check job failed")
+
+
+async def _health_snapshot_job():
+    """Create health snapshots for all non-retired nodes."""
+    from src.core.health_service import HealthService
+
+    if not async_session_factory:
+        return
+
+    async with async_session_factory() as db:
+        try:
+            result = await db.execute(
+                select(Node).where(Node.state != "retired")
+            )
+            nodes = result.scalars().all()
+
+            for node in nodes:
+                await HealthService.create_snapshot(db, node)
+
+            await db.commit()
+            logger.debug(f"Created health snapshots for {len(nodes)} nodes")
+        except Exception:
+            logger.exception("Health snapshot job failed")
+
+
+async def _health_cleanup_job():
+    """Delete old health snapshots beyond retention period."""
+    from sqlalchemy import delete
+
+    if not async_session_factory:
+        return
+
+    async with async_session_factory() as db:
+        try:
+            cutoff = datetime.now(timezone.utc) - timedelta(
+                days=settings.health.snapshot_retention_days
+            )
+            result = await db.execute(
+                delete(NodeHealthSnapshot).where(
+                    NodeHealthSnapshot.timestamp < cutoff
+                )
+            )
+            await db.commit()
+            deleted = result.rowcount
+            if deleted > 0:
+                logger.info(f"Cleaned up {deleted} old health snapshots")
+        except Exception:
+            logger.exception("Health cleanup job failed")
+
+
 OPENAPI_DESCRIPTION = """
 # PureBoot API
 
@@ -222,6 +353,10 @@ Connect to `/api/v1/ws` for real-time updates:
 - `install.progress` - Installation progress update
 - `approval.requested` - New approval request
 - `approval.resolved` - Approval approved/rejected
+- `health:alert_created` - New health alert triggered
+- `health:alert_resolved` - Health alert auto-resolved
+- `health:status_changed` - Node health status changed
+- `health:summary_updated` - Health summary counts updated
 
 ## Rate Limits
 
@@ -345,6 +480,10 @@ app = FastAPI(
             "name": "callbacks",
             "description": "Callback endpoints for provisioning agents to report step progress",
         },
+        {
+            "name": "health",
+            "description": "Node health monitoring - status, alerts, and trend data",
+        },
     ],
 )
 
@@ -382,6 +521,7 @@ app.include_router(clone_router, prefix="/api/v1", tags=["clone-sessions"])
 app.include_router(disks_router, prefix="/api/v1", tags=["disks"])
 app.include_router(callbacks_router, prefix="/api/v1", tags=["callbacks"])
 app.include_router(boot_files_router, prefix="/api/v1", tags=["boot-files"])
+app.include_router(health_router, prefix="/api/v1", tags=["health"])
 
 # Static assets directory
 assets_dir = Path("assets")

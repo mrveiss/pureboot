@@ -1,24 +1,10 @@
 import { useState } from 'react'
-import { AlertTriangle, Check, ArrowRight, ChevronDown, ChevronRight } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight } from 'lucide-react'
 import { Button, Badge } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import { ConflictDiffView } from './ConflictDiffView'
 import type { SiteConflict, ConflictResolutionAction } from '@/types/site'
 import { CONFLICT_TYPE_LABELS } from '@/types/site'
-
-function formatTimeAgo(dateStr: string): string {
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMins = Math.floor(diffMs / 60000)
-
-  if (diffMins < 1) return 'Just now'
-  if (diffMins < 60) return `${diffMins}m ago`
-  const diffHours = Math.floor(diffMins / 60)
-  if (diffHours < 24) return `${diffHours}h ago`
-  const diffDays = Math.floor(diffHours / 24)
-  return `${diffDays}d ago`
-}
 
 const TYPE_BADGE_STYLE: Record<string, string> = {
   state_mismatch: 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20',
