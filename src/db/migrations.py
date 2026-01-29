@@ -25,6 +25,7 @@ EXPECTED_SCHEMA = {
         ("pi_model", "VARCHAR(20)", None),
         ("home_site_id", "VARCHAR(36)", None),
         ("disk_scan_requested_at", "DATETIME", None),
+        ("pending_command", "VARCHAR(50)", None),
     ],
     "node_health_snapshots": [
         # This table should be created by create_all, but list columns for completeness

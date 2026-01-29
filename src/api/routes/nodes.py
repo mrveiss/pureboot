@@ -991,3 +991,99 @@ async def node_install_failed_callback(
         message=f"Install failure recorded: {error}",
         data=NodeResponse.from_node(node) if node else None,
     )
+
+
+# ============== Node Command Endpoints ==============
+
+
+class NodeCommandRequest(BaseModel):
+    """Request to send a command to a node."""
+    command: str = Field(
+        ...,
+        description="Command to execute: poweroff, reboot, rescan",
+        pattern="^(poweroff|reboot|rescan)$"
+    )
+
+
+class NodeCommandResponse(BaseModel):
+    """Response for node command status."""
+    node_id: str
+    pending_command: str | None
+    message: str
+
+
+from pydantic import BaseModel, Field
+
+
+@router.post("/nodes/{node_id}/command", response_model=ApiResponse[NodeCommandResponse])
+async def send_node_command(
+    node_id: str,
+    cmd: NodeCommandRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a command to a node.
+
+    Supported commands:
+    - poweroff: Power off the node
+    - reboot: Reboot the node
+    - rescan: Rescan disks
+
+    The command is queued and executed when the node's agent polls.
+    """
+    result = await db.execute(select(Node).where(Node.id == node_id))
+    node = result.scalar_one_or_none()
+
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    node.pending_command = cmd.command
+    await db.flush()
+
+    # Broadcast command event
+    await global_ws_manager.broadcast(
+        "node.command",
+        {
+            "node_id": node_id,
+            "command": cmd.command,
+        },
+    )
+
+    return ApiResponse(
+        data=NodeCommandResponse(
+            node_id=node_id,
+            pending_command=cmd.command,
+            message=f"Command '{cmd.command}' queued for node",
+        ),
+    )
+
+
+@router.get("/nodes/{node_id}/command", response_model=ApiResponse[NodeCommandResponse])
+async def get_node_command(
+    node_id: str,
+    clear: bool = Query(False, description="Clear the command after reading"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get pending command for a node.
+
+    This endpoint is polled by node agents to check for commands.
+    Use clear=true to clear the command after reading (acknowledge).
+    """
+    result = await db.execute(select(Node).where(Node.id == node_id))
+    node = result.scalar_one_or_none()
+
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    command = node.pending_command
+
+    if clear and command:
+        node.pending_command = None
+        await db.flush()
+
+    return ApiResponse(
+        data=NodeCommandResponse(
+            node_id=node_id,
+            pending_command=command,
+            message="Command retrieved" if command else "No pending command",
+        ),
+    )

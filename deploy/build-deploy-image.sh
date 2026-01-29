@@ -336,9 +336,11 @@ echo "Copying partition scripts..."
 cp "${SCRIPT_DIR}/scripts/pureboot-disk-scan.sh" "${ROOTFS_DIR}/usr/local/bin/"
 cp "${SCRIPT_DIR}/scripts/pureboot-partition-ops.sh" "${ROOTFS_DIR}/usr/local/bin/"
 cp "${SCRIPT_DIR}/scripts/pureboot-partition.sh" "${ROOTFS_DIR}/usr/local/bin/"
+cp "${SCRIPT_DIR}/scripts/pureboot-pending.sh" "${ROOTFS_DIR}/usr/local/bin/"
 chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-disk-scan.sh"
 chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-partition-ops.sh"
 chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-partition.sh"
+chmod +x "${ROOTFS_DIR}/usr/local/bin/pureboot-pending.sh"
 
 # Create init script
 cat > "${ROOTFS_DIR}/init" << 'INIT_EOF'

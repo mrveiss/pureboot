@@ -76,3 +76,10 @@ export function useCreateNode() {
     },
   })
 }
+
+export function useSendNodeCommand() {
+  return useMutation({
+    mutationFn: ({ nodeId, command }: { nodeId: string; command: 'poweroff' | 'reboot' | 'rescan' }) =>
+      nodesApi.sendCommand(nodeId, command),
+  })
+}

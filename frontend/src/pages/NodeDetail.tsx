@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Server, Clock, Cpu, Network, Tag, Workflow, X, Play, RotateCcw, HardDrive, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, Server, Clock, Cpu, Network, Tag, Workflow, X, Play, RotateCcw, HardDrive, AlertTriangle, Power, RefreshCw } from 'lucide-react'
 import {
   Button,
   Card,
@@ -21,7 +21,7 @@ import {
   SelectItem,
 } from '@/components/ui'
 import { StateMachine } from '@/components/nodes/StateMachine'
-import { useNode, useUpdateNodeState, useUpdateNode, useWorkflows } from '@/hooks'
+import { useNode, useUpdateNodeState, useUpdateNode, useWorkflows, useSendNodeCommand, useTriggerDiskScan } from '@/hooks'
 import { NODE_STATE_COLORS, NODE_STATE_LABELS, NODE_STATE_TRANSITIONS, ARCHITECTURE_LABELS, BOOT_MODE_LABELS, type NodeState } from '@/types'
 import { cn } from '@/lib/utils'
 
@@ -35,12 +35,16 @@ export function NodeDetail() {
   const { data: response, isLoading, error } = useNode(nodeId ?? '')
   const updateState = useUpdateNodeState()
   const updateNode = useUpdateNode()
+  const sendCommand = useSendNodeCommand()
+  const triggerScan = useTriggerDiskScan()
   const { data: workflowsResponse } = useWorkflows()
 
   const [workflowDialogOpen, setWorkflowDialogOpen] = useState(false)
   const [selectedWorkflow, setSelectedWorkflow] = useState<string>('')
   const [forceStateDialogOpen, setForceStateDialogOpen] = useState(false)
   const [selectedForceState, setSelectedForceState] = useState<string>('')
+  const [commandDialogOpen, setCommandDialogOpen] = useState(false)
+  const [pendingCommand, setPendingCommand] = useState<'poweroff' | 'reboot' | null>(null)
 
   const workflows = workflowsResponse?.data ?? []
   const allStates: NodeState[] = [
@@ -125,6 +129,28 @@ export function NodeDetail() {
         },
       }
     )
+  }
+
+  const handleSendCommand = (command: 'poweroff' | 'reboot') => {
+    setPendingCommand(command)
+    setCommandDialogOpen(true)
+  }
+
+  const confirmCommand = () => {
+    if (!pendingCommand) return
+    sendCommand.mutate(
+      { nodeId: node.id, command: pendingCommand },
+      {
+        onSuccess: () => {
+          setCommandDialogOpen(false)
+          setPendingCommand(null)
+        },
+      }
+    )
+  }
+
+  const handleRescan = () => {
+    triggerScan.mutate(node.id)
   }
 
   const currentWorkflow = workflows.find((w) => w.id === node.workflow_id)
@@ -431,6 +457,50 @@ export function NodeDetail() {
             </Card>
           )}
 
+          {/* Node Control - available when node is polling (pending/installing state) */}
+          {(node.state === 'pending' || node.state === 'installing') && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Power className="h-5 w-5" />
+                  Node Control
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Control the node while it is booted into the deploy environment.
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={handleRescan}
+                    disabled={triggerScan.isPending}
+                  >
+                    <RefreshCw className={cn("mr-2 h-4 w-4", triggerScan.isPending && "animate-spin")} />
+                    Scan
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => handleSendCommand('reboot')}
+                    disabled={sendCommand.isPending}
+                  >
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                    Reboot
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => handleSendCommand('poweroff')}
+                    disabled={sendCommand.isPending}
+                    className="text-destructive hover:text-destructive"
+                  >
+                    <Power className="mr-2 h-4 w-4" />
+                    Off
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Admin Override - Force State */}
           <Card className="border-amber-500/50">
             <CardHeader>
@@ -615,6 +685,43 @@ export function NodeDetail() {
               disabled={!selectedForceState || selectedForceState === node.state || updateState.isPending}
             >
               {updateState.isPending ? 'Forcing...' : 'Force Change'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Node Command Confirmation Dialog */}
+      <Dialog open={commandDialogOpen} onOpenChange={setCommandDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {pendingCommand === 'poweroff' ? (
+                <Power className="h-5 w-5 text-destructive" />
+              ) : (
+                <RotateCcw className="h-5 w-5" />
+              )}
+              Confirm {pendingCommand === 'poweroff' ? 'Power Off' : 'Reboot'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">
+              {pendingCommand === 'poweroff' ? (
+                <>Are you sure you want to power off this node? You will need physical access or remote management to power it back on.</>
+              ) : (
+                <>Are you sure you want to reboot this node? It will boot back into the deploy environment.</>
+              )}
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCommandDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant={pendingCommand === 'poweroff' ? 'destructive' : 'default'}
+              onClick={confirmCommand}
+              disabled={sendCommand.isPending}
+            >
+              {sendCommand.isPending ? 'Sending...' : (pendingCommand === 'poweroff' ? 'Power Off' : 'Reboot')}
             </Button>
           </DialogFooter>
         </DialogContent>

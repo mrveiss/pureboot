@@ -169,6 +169,9 @@ class Node(Base):
     # Disk scan request (set when UI requests scan, cleared after agent reports)
     disk_scan_requested_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
+    # Pending command for agent to execute (poweroff, reboot, rescan, etc.)
+    pending_command: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
     # State log relationship
     state_logs: Mapped[list["NodeStateLog"]] = relationship(
         back_populates="node", cascade="all, delete-orphan"

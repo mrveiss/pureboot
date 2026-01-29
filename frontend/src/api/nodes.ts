@@ -90,6 +90,12 @@ export const nodesApi = {
       new_state: newState,
     })
   },
+
+  async sendCommand(nodeId: string, command: 'poweroff' | 'reboot' | 'rescan'): Promise<ApiResponse<{ command: string; node_id: string; pending_command: string }>> {
+    return apiClient.post<ApiResponse<{ command: string; node_id: string; pending_command: string }>>(`/nodes/${nodeId}/command`, {
+      command,
+    })
+  },
 }
 
 export const groupsApi = {
