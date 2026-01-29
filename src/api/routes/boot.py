@@ -675,6 +675,31 @@ async def get_boot_status(
     if request.client:
         node.ip_address = request.client.host
 
+    # Check for pending commands (poweroff, reboot)
+    if node.pending_command:
+        command = node.pending_command
+        node.pending_command = None  # Clear the command
+        await db.flush()
+
+        if command == "poweroff":
+            return f"""#!ipxe
+# Command: poweroff
+echo [{short_id}] Poweroff command received
+echo Shutting down in 3 seconds...
+sleep 3
+poweroff
+"""
+        elif command == "reboot":
+            return f"""#!ipxe
+# Command: reboot
+echo [{short_id}] Reboot command received
+echo Rebooting in 3 seconds...
+sleep 3
+reboot
+"""
+        # For 'rescan' command, we can't do disk scan from iPXE
+        # It would require booting into the deploy environment
+
     # Check if workflow is assigned
     if node.state == "pending" and node.workflow_id:
         # Workflow assigned - chain to main boot endpoint
