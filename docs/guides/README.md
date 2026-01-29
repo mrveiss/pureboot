@@ -9,6 +9,7 @@ This directory contains user and developer guides for PureBoot.
 - [getting-started.md](getting-started.md) - Quick start guide
 - [installation.md](installation.md) - Installation instructions
 - [configuration.md](configuration.md) - Configuration reference
+- [raspberry-pi-network-boot.md](raspberry-pi-network-boot.md) - Raspberry Pi network boot setup
 
 ### Developer Guides
 
