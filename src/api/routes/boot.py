@@ -282,17 +282,25 @@ exit
 def generate_pending_no_workflow_script(node: Node, server: str) -> str:
     """Generate iPXE script for pending node without workflow.
 
-    Node will poll /boot/status endpoint until a workflow is assigned.
-    The status endpoint returns a small script that either chains to /boot
-    (when ready) or sleeps and re-polls (when waiting).
+    Boots into deploy environment to scan disks and wait for workflow.
+    The deploy environment will:
+    1. Scan disks and report to controller
+    2. Poll for workflow assignment
+    3. Execute workflow when assigned
     """
     short_id = node.mac_address.replace(":", "")[-6:].upper()
     mac = node.mac_address
+    ip_addr = node.ip_address or "${net0/ip}"
+    grub_efi = f"{server}/api/v1/files/tftp/uefi/grubx64.efi"
+
     return f"""#!ipxe
 # PureBoot - Pending (no workflow assigned)
 # Node: {mac}
+# Booting into deploy environment for disk discovery
 
-:start
+console --x 800 --y 600 ||
+clear ||
+
 echo
 echo ========================================
 echo   PureBoot - Awaiting Workflow
@@ -300,19 +308,44 @@ echo ========================================
 echo
 echo   Node ID:  {short_id}
 echo   MAC:      {mac}
-echo   IP:       ${{net0/ip}}
-echo   Status:   Pending - awaiting workflow assignment
+echo   IP:       {ip_addr}
+echo   Status:   Pending
+echo   Server:   {server}
 echo
 echo   Assign a workflow in the PureBoot UI.
 echo
+echo ========================================
+echo
+echo Attempting to boot deploy environment...
+
+chain {grub_efi} || goto poll
 
 :poll
-echo [{short_id}] Checking for workflow...
+console --x 800 --y 600 ||
+clear ||
+echo
+echo ========================================
+echo   PureBoot - Awaiting Workflow
+echo ========================================
+echo
+echo   Node ID:  {short_id}
+echo   MAC:      {mac}
+echo   IP:       {ip_addr}
+echo   Status:   Pending
+echo   Server:   {server}
+echo
+echo   Assign a workflow in the PureBoot UI.
+echo
+echo ========================================
+echo
+echo Polling for workflow assignment...
+echo
+
 chain {server}/api/v1/boot/status?mac={mac} || goto retry
+goto poll
 
 :retry
-echo [{short_id}] Server unreachable, retry in 10s...
-sleep 10
+sleep 5
 goto poll
 """
 
@@ -501,14 +534,42 @@ async def get_grub_config(
     result = await db.execute(select(Node).where(Node.mac_address == mac))
     node = result.scalar_one_or_none()
 
-    if not node or not node.workflow_id:
-        # No node or workflow - boot local
+    if not node:
+        # Unknown node - boot local
         return """set default=0
 set timeout=5
 
 menuentry "Boot from local disk" {
     exit
 }
+"""
+
+    if not node.workflow_id:
+        # Pending node without workflow - boot into deploy environment for disk discovery
+        deploy_kernel = f"{server}/api/v1/files/tftp/deploy/vmlinuz-virt"
+        deploy_initrd = f"{server}/api/v1/files/tftp/deploy/initramfs-virt"
+        cmdline = (
+            f"ip=dhcp "
+            f"pureboot.server={server} "
+            f"pureboot.node_id={node.id} "
+            f"pureboot.mac={node.mac_address} "
+            f"pureboot.mode=pending "
+            f"console=ttyS0 console=tty0"
+        )
+        return f"""set default=0
+set timeout=3
+
+menuentry "PureBoot Deploy Environment - {node.mac_address}" {{
+    echo "Loading deploy kernel..."
+    linux {deploy_kernel} {cmdline}
+    echo "Loading initrd..."
+    initrd {deploy_initrd}
+    echo "Booting..."
+}}
+
+menuentry "Boot from local disk" {{
+    exit
+}}
 """
 
     try:
@@ -630,16 +691,36 @@ sleep 5
 goto start
 """
 
-    # Still waiting - sleep and re-poll
+    # Still waiting - clear screen and show status with node info
+    ip_addr = node.ip_address or "${net0/ip}"
     return f"""#!ipxe
 # Still waiting for workflow assignment
-:poll
-echo [{short_id}] Waiting for workflow...
+console --x 800 --y 600 ||
+clear ||
+
+echo
+echo ========================================
+echo   PureBoot - Awaiting Workflow
+echo ========================================
+echo
+echo   Node ID:  {short_id}
+echo   MAC:      {mac}
+echo   IP:       {ip_addr}
+echo   Status:   Pending
+echo   Server:   {server}
+echo
+echo   Assign a workflow in the PureBoot UI.
+echo
+echo ========================================
+echo
+echo Polling for workflow assignment...
+echo
+
 sleep 10
 chain {server}/api/v1/boot/status?mac={mac} || goto retry
 
 :retry
-echo [{short_id}] Server unreachable, retrying in 5s...
+echo Server unreachable, retrying...
 sleep 5
-goto poll
+chain {server}/api/v1/boot/status?mac={mac} || goto retry
 """

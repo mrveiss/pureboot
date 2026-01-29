@@ -115,6 +115,10 @@ case "${PUREBOOT_MODE}" in
         log "Dispatching to partition management..."
         exec /usr/local/bin/pureboot-partition.sh
         ;;
+    pending)
+        log "Dispatching to pending mode (disk discovery)..."
+        exec /usr/local/bin/pureboot-pending.sh
+        ;;
     image|"")
         log "Dispatching to image deployment (legacy)..."
         exec /usr/local/bin/pureboot-image.sh
