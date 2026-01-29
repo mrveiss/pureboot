@@ -291,7 +291,13 @@ def generate_pending_no_workflow_script(node: Node, server: str) -> str:
     short_id = node.mac_address.replace(":", "")[-6:].upper()
     mac = node.mac_address
     ip_addr = node.ip_address or "${net0/ip}"
-    grub_efi = f"{server}/api/v1/files/tftp/uefi/grubx64.efi"
+
+    # Deploy kernel and initrd paths
+    kernel_url = f"{server}/api/v1/files/tftp/deploy/vmlinuz-virt"
+    initrd_url = f"{server}/api/v1/files/tftp/deploy/initramfs-virt"
+
+    # Kernel command line for pending mode
+    cmdline = f"pureboot.mode=pending pureboot.server={server} pureboot.mac={mac} pureboot.node_id={node.id} ip=dhcp console=tty0 console=ttyS0,115200"
 
     return f"""#!ipxe
 # PureBoot - Pending (no workflow assigned)
@@ -303,7 +309,7 @@ clear ||
 
 echo
 echo ========================================
-echo   PureBoot - Awaiting Workflow
+echo   PureBoot - Booting Deploy Environment
 echo ========================================
 echo
 echo   Node ID:  {short_id}
@@ -312,13 +318,14 @@ echo   IP:       {ip_addr}
 echo   Status:   Pending
 echo   Server:   {server}
 echo
-echo   Assign a workflow in the PureBoot UI.
-echo
 echo ========================================
 echo
-echo Attempting to boot deploy environment...
-
-chain {grub_efi} || goto poll
+echo Loading kernel...
+kernel {kernel_url} {cmdline} || goto poll
+echo Loading initrd...
+initrd {initrd_url} || goto poll
+echo Booting deploy environment...
+boot || goto poll
 
 :poll
 console --x 800 --y 600 ||
@@ -338,7 +345,8 @@ echo   Assign a workflow in the PureBoot UI.
 echo
 echo ========================================
 echo
-echo Polling for workflow assignment...
+echo Deploy environment boot failed.
+echo Falling back to iPXE polling mode...
 echo
 
 chain {server}/api/v1/boot/status?mac={mac} || goto retry
