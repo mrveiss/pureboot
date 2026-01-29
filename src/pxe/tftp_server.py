@@ -5,7 +5,7 @@ import struct
 from dataclasses import dataclass, field
 from enum import IntEnum
 from pathlib import Path
-from typing import AsyncIterator
+from typing import AsyncIterator, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -128,17 +128,106 @@ class TFTPPacket:
 
 
 class TFTPHandler:
-    """Handles TFTP file operations."""
+    """Handles TFTP file operations with Pi discovery fallback.
 
-    def __init__(self, root: Path):
-        """Initialize handler with TFTP root directory."""
+    This handler supports automatic Pi discovery by detecting requests
+    that look like Pi network boot (8-char hex serial + known boot file)
+    and falling back to a discovery directory when the serial directory
+    doesn't exist.
+    """
+
+    def __init__(
+        self,
+        root: Path,
+        pi_discovery_enabled: bool = False,
+        pi_discovery_dir: Optional[Path] = None,
+        pi_nodes_dir: Optional[Path] = None,
+        on_pi_discovery: Optional[Callable[[str, str], None]] = None,
+    ):
+        """Initialize handler with TFTP root directory.
+
+        Args:
+            root: TFTP root directory.
+            pi_discovery_enabled: Enable Pi auto-discovery fallback.
+            pi_discovery_dir: Directory containing discovery boot files.
+            pi_nodes_dir: Directory containing per-node directories.
+            on_pi_discovery: Callback when a discovery request is detected.
+                Called with (serial, filename).
+        """
         self.root = Path(root).resolve()
+        self.pi_discovery_enabled = pi_discovery_enabled
+        self.pi_discovery_dir = Path(pi_discovery_dir).resolve() if pi_discovery_dir else None
+        self.pi_nodes_dir = Path(pi_nodes_dir).resolve() if pi_nodes_dir else None
+        self.on_pi_discovery = on_pi_discovery
+
+    def _is_pi_serial_request(self, path: str) -> tuple[bool, str, str]:
+        """Check if a TFTP path looks like a Pi serial number request.
+
+        Pi network boot requests files with paths like:
+        - /<serial>/start4.elf
+        - /<serial>/bootcode.bin
+        - /<serial>/config.txt
+
+        Uses combined detection: path must have 8-hex-char directory
+        AND the file must be a known Pi boot file.
+
+        Args:
+            path: The TFTP request path.
+
+        Returns:
+            Tuple of (is_pi_request, serial_number, filename).
+        """
+        # Import here to avoid circular imports
+        from src.pxe.pi_manager import is_pi_serial_request
+        return is_pi_serial_request(path)
 
     def _resolve_path(self, filename: str) -> Path:
-        """Resolve filename to safe path within root."""
+        """Resolve filename to safe path within root.
+
+        For Pi network boot requests, this method implements fallback logic:
+        1. Check if the serial directory exists in pi_nodes_dir
+        2. If not, and discovery is enabled, fallback to pi_discovery_dir
+        3. Otherwise, use the standard root path resolution
+        """
         # Strip leading slashes - TFTP paths are relative to root
+        original_filename = filename
         filename = filename.lstrip("/")
-        # Normalize and resolve
+
+        # Check for Pi discovery fallback
+        if self.pi_discovery_enabled and self.pi_discovery_dir:
+            is_pi_request, serial, boot_file = self._is_pi_serial_request(original_filename)
+
+            if is_pi_request:
+                # Check if this serial has a registered node directory
+                if self.pi_nodes_dir:
+                    node_dir = self.pi_nodes_dir / serial
+                    if node_dir.exists():
+                        # Node exists, resolve normally from root
+                        requested = (self.root / filename).resolve()
+                        if not str(requested).startswith(str(self.root)):
+                            raise PermissionError(f"Access denied: {filename}")
+                        return requested
+
+                # Unknown Pi - use discovery fallback
+                logger.info(
+                    f"Pi discovery: Unknown serial {serial} requesting {boot_file}, "
+                    f"using discovery directory"
+                )
+
+                # Call discovery callback if set
+                if self.on_pi_discovery:
+                    try:
+                        self.on_pi_discovery(serial, boot_file)
+                    except Exception as e:
+                        logger.error(f"Pi discovery callback error: {e}")
+
+                # Resolve from discovery directory
+                requested = (self.pi_discovery_dir / boot_file).resolve()
+                if not str(requested).startswith(str(self.pi_discovery_dir)):
+                    raise PermissionError(f"Access denied: {boot_file}")
+                return requested
+
+        # Standard path resolution
         requested = (self.root / filename).resolve()
 
         # Ensure path is within root (prevent directory traversal)
@@ -382,19 +471,39 @@ class TFTPServerProtocol(asyncio.DatagramProtocol):
 
 
 class TFTPServer:
-    """Async TFTP server."""
+    """Async TFTP server with Pi discovery support."""
 
     def __init__(
         self,
         root: Path,
         host: str = "0.0.0.0",
         port: int = 69,
-        on_request: callable = None
+        on_request: Callable = None,
+        pi_discovery_enabled: bool = False,
+        pi_discovery_dir: Optional[Path] = None,
+        pi_nodes_dir: Optional[Path] = None,
+        on_pi_discovery: Optional[Callable[[str, str], None]] = None,
     ):
+        """Initialize TFTP server.
+
+        Args:
+            root: TFTP root directory.
+            host: Host to bind to.
+            port: Port to bind to (default 69).
+            on_request: Callback for TFTP requests.
+            pi_discovery_enabled: Enable Pi auto-discovery fallback.
+            pi_discovery_dir: Directory containing Pi discovery boot files.
+            pi_nodes_dir: Directory containing per-Pi node directories.
+            on_pi_discovery: Callback when a Pi discovery request is detected.
+        """
         self.root = Path(root)
         self.host = host
         self._port = port
         self.on_request = on_request
+        self.pi_discovery_enabled = pi_discovery_enabled
+        self.pi_discovery_dir = pi_discovery_dir
+        self.pi_nodes_dir = pi_nodes_dir
+        self.on_pi_discovery = on_pi_discovery
         self.transport = None
         self.protocol = None
 
@@ -407,7 +516,13 @@ class TFTPServer:
 
     async def start(self):
         """Start the TFTP server."""
-        handler = TFTPHandler(self.root)
+        handler = TFTPHandler(
+            root=self.root,
+            pi_discovery_enabled=self.pi_discovery_enabled,
+            pi_discovery_dir=self.pi_discovery_dir,
+            pi_nodes_dir=self.pi_nodes_dir,
+            on_pi_discovery=self.on_pi_discovery,
+        )
         loop = asyncio.get_event_loop()
 
         self.transport, self.protocol = await loop.create_datagram_endpoint(
@@ -417,6 +532,8 @@ class TFTPServer:
 
         actual_port = self.transport.get_extra_info("sockname")[1]
         logger.info(f"TFTP server started on {self.host}:{actual_port}")
+        if self.pi_discovery_enabled:
+            logger.info(f"Pi discovery enabled, fallback dir: {self.pi_discovery_dir}")
 
     async def stop(self):
         """Stop the TFTP server."""

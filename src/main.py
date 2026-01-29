@@ -37,6 +37,7 @@ from src.config import settings
 from src.pxe.tftp_server import TFTPServer
 from src.pxe.dhcp_proxy import DHCPProxy
 from src.pxe.ipxe_scripts import update_tftp_boot_scripts
+from src.pxe.pi_manager import PiDiscoveryManager
 from sqlalchemy import select
 from src.core.scheduler import sync_scheduler
 from src.core.escalation_job import process_escalations
@@ -93,10 +94,44 @@ async def lifespan(app: FastAPI):
 
     # Start TFTP server if enabled
     if settings.tftp.enabled:
+        # Initialize Pi discovery if enabled
+        pi_discovery_dir = None
+        pi_nodes_dir = None
+        on_pi_discovery = None
+
+        if settings.pi.enabled and settings.pi.discovery_enabled:
+            # Ensure Pi nodes directory exists
+            pi_nodes_dir = Path(settings.pi.nodes_dir)
+            pi_nodes_dir.mkdir(parents=True, exist_ok=True)
+
+            # Initialize discovery directory
+            discovery_manager = PiDiscoveryManager(
+                discovery_dir=settings.pi.discovery_dir,
+                firmware_dir=settings.pi.firmware_dir,
+                deploy_dir=settings.pi.deploy_dir,
+                default_model=settings.pi.discovery_default_model,
+                controller_url=f"http://{server_ip}:{settings.port}",
+            )
+            discovery_manager.ensure_discovery_directory()
+            pi_discovery_dir = settings.pi.discovery_dir
+
+            # Callback for logging Pi discovery events
+            def on_pi_discovery_callback(serial: str, filename: str):
+                logger.info(
+                    f"Pi discovery request: serial={serial}, file={filename}"
+                )
+
+            on_pi_discovery = on_pi_discovery_callback
+            logger.info(f"Pi discovery enabled, directory: {pi_discovery_dir}")
+
         tftp_server = TFTPServer(
             root=tftp_root,
             host=settings.tftp.host,
-            port=settings.tftp.port
+            port=settings.tftp.port,
+            pi_discovery_enabled=settings.pi.enabled and settings.pi.discovery_enabled,
+            pi_discovery_dir=pi_discovery_dir,
+            pi_nodes_dir=pi_nodes_dir,
+            on_pi_discovery=on_pi_discovery,
         )
         try:
             await tftp_server.start()

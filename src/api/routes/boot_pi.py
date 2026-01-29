@@ -60,6 +60,10 @@ async def get_pi_boot_instructions(
         None,
         description="MAC address for auto-registration",
     ),
+    mode: str | None = Query(
+        None,
+        description="Boot mode: 'discovery' for auto-discovered Pi, None for normal",
+    ),
     db: AsyncSession = Depends(get_db),
     *,
     request: Request,
@@ -69,9 +73,14 @@ async def get_pi_boot_instructions(
     This endpoint is called by the Pi deploy environment during network boot
     to determine what action to take based on the node's current state.
 
+    When mode='discovery', the Pi was booted via the discovery fallback
+    (unknown serial number with no pre-registered directory). The controller
+    will auto-register the Pi if auto_register is enabled.
+
     Args:
         serial: Pi serial number (8 hex characters).
         mac: Optional MAC address for auto-registration.
+        mode: Optional boot mode ('discovery' for auto-discovered Pi).
         request: FastAPI request object.
         db: Database session.
 
@@ -81,6 +90,9 @@ async def get_pi_boot_instructions(
     Raises:
         HTTPException: If serial number is invalid.
     """
+    # Log discovery mode requests
+    if mode == "discovery":
+        logger.info(f"Pi discovery mode boot: serial={serial}, mac={mac}")
     # Validate and normalize serial number
     serial = serial.lower()
     if not validate_serial(serial):
@@ -111,8 +123,12 @@ async def get_pi_boot_instructions(
     node = result.scalar_one_or_none()
 
     if not node:
-        # Node not found
-        if not settings.registration.auto_register:
+        # Node not found - check if we should auto-register
+        # In discovery mode, always auto-register (user explicitly enabled Pi discovery)
+        # Otherwise, check the auto_register setting
+        should_register = mode == "discovery" or settings.registration.auto_register
+
+        if not should_register:
             # Auto-registration disabled - return local boot
             return PiBootResponse(
                 state="unknown",
@@ -121,6 +137,12 @@ async def get_pi_boot_instructions(
             )
 
         # Auto-register new node
+        is_discovery = mode == "discovery"
+        logger.info(
+            f"Auto-registering Pi: serial={serial}, mac={mac}, "
+            f"discovery_mode={is_discovery}"
+        )
+
         node = Node(
             serial_number=serial,
             mac_address=mac or f"pi-{serial}",  # Use placeholder if MAC not provided

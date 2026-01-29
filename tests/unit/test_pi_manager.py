@@ -6,6 +6,297 @@ import tempfile
 import shutil
 
 
+class TestPiBootFileDetection:
+    """Tests for Pi boot file detection functions."""
+
+    def test_is_pi_boot_file_known_files(self):
+        """Known Pi boot files are detected."""
+        from src.pxe.pi_manager import is_pi_boot_file
+
+        known_files = [
+            "bootcode.bin",
+            "start.elf",
+            "start4.elf",
+            "fixup.dat",
+            "fixup4.dat",
+            "config.txt",
+            "cmdline.txt",
+            "kernel8.img",
+            "initramfs.img",
+        ]
+
+        for filename in known_files:
+            assert is_pi_boot_file(filename), f"Expected {filename} to be detected as Pi boot file"
+
+    def test_is_pi_boot_file_dtb_files(self):
+        """DTB files matching pattern are detected."""
+        from src.pxe.pi_manager import is_pi_boot_file
+
+        dtb_files = [
+            "bcm2710-rpi-3-b.dtb",
+            "bcm2710-rpi-3-b-plus.dtb",
+            "bcm2711-rpi-4-b.dtb",
+            "bcm2712-rpi-5-b.dtb",
+        ]
+
+        for filename in dtb_files:
+            assert is_pi_boot_file(filename), f"Expected {filename} to be detected as Pi boot file"
+
+    def test_is_pi_boot_file_non_pi_files(self):
+        """Non-Pi boot files are not detected."""
+        from src.pxe.pi_manager import is_pi_boot_file
+
+        non_pi_files = [
+            "random.txt",
+            "pxelinux.0",
+            "grub.cfg",
+            "ipxe.efi",
+            "vmlinuz",
+            "initrd.gz",
+        ]
+
+        for filename in non_pi_files:
+            assert not is_pi_boot_file(filename), f"Expected {filename} to NOT be detected as Pi boot file"
+
+    def test_is_pi_boot_file_case_insensitive(self):
+        """Detection is case insensitive."""
+        from src.pxe.pi_manager import is_pi_boot_file
+
+        assert is_pi_boot_file("BOOTCODE.BIN")
+        assert is_pi_boot_file("Start4.Elf")
+        assert is_pi_boot_file("CONFIG.TXT")
+
+
+class TestPiSerialRequestDetection:
+    """Tests for Pi serial request detection."""
+
+    def test_valid_pi_request_detected(self):
+        """Valid Pi serial request is detected."""
+        from src.pxe.pi_manager import is_pi_serial_request
+
+        is_pi, serial, filename = is_pi_serial_request("/d83add36/start4.elf")
+        assert is_pi is True
+        assert serial == "d83add36"
+        assert filename == "start4.elf"
+
+    def test_pi_request_bootcode_bin(self):
+        """Pi 3 bootcode.bin request is detected."""
+        from src.pxe.pi_manager import is_pi_serial_request
+
+        is_pi, serial, filename = is_pi_serial_request("/a1b2c3d4/bootcode.bin")
+        assert is_pi is True
+        assert serial == "a1b2c3d4"
+        assert filename == "bootcode.bin"
+
+    def test_pi_request_with_leading_slashes(self):
+        """Multiple leading slashes are handled."""
+        from src.pxe.pi_manager import is_pi_serial_request
+
+        is_pi, serial, filename = is_pi_serial_request("//d83add36/config.txt")
+        assert is_pi is True
+        assert serial == "d83add36"
+        assert filename == "config.txt"
+
+    def test_non_pi_request_wrong_serial(self):
+        """Request with invalid serial is not detected."""
+        from src.pxe.pi_manager import is_pi_serial_request
+
+        # Too short
+        is_pi, serial, filename = is_pi_serial_request("/abc123/start4.elf")
+        assert is_pi is False
+
+        # Invalid characters
+        is_pi, serial, filename = is_pi_serial_request("/ghijklmn/start4.elf")
+        assert is_pi is False
+
+    def test_non_pi_request_wrong_file(self):
+        """Request with valid serial but non-Pi file is not detected."""
+        from src.pxe.pi_manager import is_pi_serial_request
+
+        is_pi, serial, filename = is_pi_serial_request("/d83add36/pxelinux.0")
+        assert is_pi is False
+
+    def test_non_pi_request_no_directory(self):
+        """Request without directory is not detected."""
+        from src.pxe.pi_manager import is_pi_serial_request
+
+        is_pi, serial, filename = is_pi_serial_request("/start4.elf")
+        assert is_pi is False
+
+        is_pi, serial, filename = is_pi_serial_request("start4.elf")
+        assert is_pi is False
+
+
+class TestPiDiscoveryManager:
+    """Tests for PiDiscoveryManager class."""
+
+    @pytest.fixture
+    def temp_discovery_root(self):
+        """Create temporary directories for discovery testing."""
+        root = Path(tempfile.mkdtemp())
+        # Create firmware directory with Pi 3 and Pi 4 files
+        firmware_dir = root / "rpi-firmware"
+        firmware_dir.mkdir(parents=True)
+        (firmware_dir / "bootcode.bin").touch()
+        (firmware_dir / "start.elf").touch()
+        (firmware_dir / "fixup.dat").touch()
+        (firmware_dir / "start4.elf").touch()
+        (firmware_dir / "fixup4.dat").touch()
+        (firmware_dir / "bcm2710-rpi-3-b.dtb").touch()
+        (firmware_dir / "bcm2711-rpi-4-b.dtb").touch()
+
+        # Create deploy directory
+        deploy_dir = root / "deploy-arm64"
+        deploy_dir.mkdir(parents=True)
+        (deploy_dir / "kernel8.img").touch()
+        (deploy_dir / "initramfs.img").touch()
+
+        yield root
+        shutil.rmtree(root)
+
+    def test_ensure_discovery_directory_creates_dir(self, temp_discovery_root):
+        """ensure_discovery_directory creates the directory if it doesn't exist."""
+        from src.pxe.pi_manager import PiDiscoveryManager
+
+        discovery_dir = temp_discovery_root / "pi-discovery"
+        manager = PiDiscoveryManager(
+            discovery_dir=discovery_dir,
+            firmware_dir=temp_discovery_root / "rpi-firmware",
+            deploy_dir=temp_discovery_root / "deploy-arm64",
+        )
+
+        result = manager.ensure_discovery_directory()
+
+        assert result == discovery_dir
+        assert discovery_dir.exists()
+
+    def test_discovery_directory_has_firmware_symlinks(self, temp_discovery_root):
+        """Discovery directory contains symlinks to firmware files."""
+        from src.pxe.pi_manager import PiDiscoveryManager
+
+        discovery_dir = temp_discovery_root / "pi-discovery"
+        manager = PiDiscoveryManager(
+            discovery_dir=discovery_dir,
+            firmware_dir=temp_discovery_root / "rpi-firmware",
+            deploy_dir=temp_discovery_root / "deploy-arm64",
+        )
+
+        manager.ensure_discovery_directory()
+
+        # Pi 3 firmware
+        assert (discovery_dir / "bootcode.bin").is_symlink()
+        assert (discovery_dir / "start.elf").is_symlink()
+        assert (discovery_dir / "fixup.dat").is_symlink()
+
+        # Pi 4 firmware
+        assert (discovery_dir / "start4.elf").is_symlink()
+        assert (discovery_dir / "fixup4.dat").is_symlink()
+
+    def test_discovery_directory_has_dtb_symlinks(self, temp_discovery_root):
+        """Discovery directory contains symlinks to DTB files."""
+        from src.pxe.pi_manager import PiDiscoveryManager
+
+        discovery_dir = temp_discovery_root / "pi-discovery"
+        manager = PiDiscoveryManager(
+            discovery_dir=discovery_dir,
+            firmware_dir=temp_discovery_root / "rpi-firmware",
+            deploy_dir=temp_discovery_root / "deploy-arm64",
+        )
+
+        manager.ensure_discovery_directory()
+
+        assert (discovery_dir / "bcm2710-rpi-3-b.dtb").is_symlink()
+        assert (discovery_dir / "bcm2711-rpi-4-b.dtb").is_symlink()
+
+    def test_discovery_directory_has_deploy_symlinks(self, temp_discovery_root):
+        """Discovery directory contains symlinks to deploy files."""
+        from src.pxe.pi_manager import PiDiscoveryManager
+
+        discovery_dir = temp_discovery_root / "pi-discovery"
+        manager = PiDiscoveryManager(
+            discovery_dir=discovery_dir,
+            firmware_dir=temp_discovery_root / "rpi-firmware",
+            deploy_dir=temp_discovery_root / "deploy-arm64",
+        )
+
+        manager.ensure_discovery_directory()
+
+        assert (discovery_dir / "kernel8.img").is_symlink()
+        assert (discovery_dir / "initramfs.img").is_symlink()
+
+    def test_discovery_config_txt_content(self, temp_discovery_root):
+        """Discovery config.txt has correct content."""
+        from src.pxe.pi_manager import PiDiscoveryManager
+
+        discovery_dir = temp_discovery_root / "pi-discovery"
+        manager = PiDiscoveryManager(
+            discovery_dir=discovery_dir,
+            firmware_dir=temp_discovery_root / "rpi-firmware",
+            deploy_dir=temp_discovery_root / "deploy-arm64",
+        )
+
+        manager.ensure_discovery_directory()
+
+        config_txt = (discovery_dir / "config.txt").read_text()
+        assert "arm_64bit=1" in config_txt
+        assert "kernel=kernel8.img" in config_txt
+        assert "Discovery Mode" in config_txt
+
+    def test_discovery_cmdline_txt_content(self, temp_discovery_root):
+        """Discovery cmdline.txt has correct content."""
+        from src.pxe.pi_manager import PiDiscoveryManager
+
+        discovery_dir = temp_discovery_root / "pi-discovery"
+        manager = PiDiscoveryManager(
+            discovery_dir=discovery_dir,
+            firmware_dir=temp_discovery_root / "rpi-firmware",
+            deploy_dir=temp_discovery_root / "deploy-arm64",
+            controller_url="http://192.168.1.100:8080",
+        )
+
+        manager.ensure_discovery_directory()
+
+        cmdline_txt = (discovery_dir / "cmdline.txt").read_text()
+        assert "pureboot.mode=discovery" in cmdline_txt
+        assert "pureboot.state=discovered" in cmdline_txt
+        assert "pureboot.url=http://192.168.1.100:8080" in cmdline_txt
+        assert "ip=dhcp" in cmdline_txt
+
+    def test_discovery_cmdline_without_controller_url(self, temp_discovery_root):
+        """Discovery cmdline.txt works without controller URL."""
+        from src.pxe.pi_manager import PiDiscoveryManager
+
+        discovery_dir = temp_discovery_root / "pi-discovery"
+        manager = PiDiscoveryManager(
+            discovery_dir=discovery_dir,
+            firmware_dir=temp_discovery_root / "rpi-firmware",
+            deploy_dir=temp_discovery_root / "deploy-arm64",
+        )
+
+        manager.ensure_discovery_directory()
+
+        cmdline_txt = (discovery_dir / "cmdline.txt").read_text()
+        assert "pureboot.mode=discovery" in cmdline_txt
+        assert "pureboot.url=" not in cmdline_txt
+
+    def test_update_controller_url(self, temp_discovery_root):
+        """Controller URL can be updated."""
+        from src.pxe.pi_manager import PiDiscoveryManager
+
+        discovery_dir = temp_discovery_root / "pi-discovery"
+        manager = PiDiscoveryManager(
+            discovery_dir=discovery_dir,
+            firmware_dir=temp_discovery_root / "rpi-firmware",
+            deploy_dir=temp_discovery_root / "deploy-arm64",
+        )
+
+        manager.ensure_discovery_directory()
+        manager.update_controller_url("http://newserver:9000")
+
+        cmdline_txt = (discovery_dir / "cmdline.txt").read_text()
+        assert "pureboot.url=http://newserver:9000" in cmdline_txt
+
+
 def test_pi_manager_importable_from_pxe():
     """PiManager is importable from src.pxe module."""
     from src.pxe import PiManager

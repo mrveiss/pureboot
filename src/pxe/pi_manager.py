@@ -12,12 +12,37 @@ import logging
 import re
 import shutil
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
 # Valid serial number pattern: 8 lowercase hex characters
 SERIAL_PATTERN = re.compile(r"^[0-9a-f]{8}$")
+
+# Known Pi boot files for detection (combined approach)
+# These files indicate a request is likely from a Pi network boot
+PI_BOOT_FILES: Set[str] = {
+    # First-stage bootloader (Pi 3 only)
+    "bootcode.bin",
+    # GPU firmware
+    "start.elf", "start4.elf", "start_x.elf", "start4x.elf",
+    "start_db.elf", "start4db.elf", "start_cd.elf", "start4cd.elf",
+    # Memory configuration
+    "fixup.dat", "fixup4.dat", "fixup_x.dat", "fixup4x.dat",
+    "fixup_db.dat", "fixup4db.dat", "fixup_cd.dat", "fixup4cd.dat",
+    # Configuration files
+    "config.txt", "cmdline.txt",
+    # Kernel and initramfs
+    "kernel.img", "kernel7.img", "kernel7l.img", "kernel8.img",
+    "initramfs.img", "initrd.img",
+    # Device trees (common ones)
+    "bcm2710-rpi-3-b.dtb", "bcm2710-rpi-3-b-plus.dtb",
+    "bcm2710-rpi-cm3.dtb", "bcm2711-rpi-4-b.dtb",
+    "bcm2712-rpi-5-b.dtb",
+}
+
+# DTB pattern for matching any .dtb file
+DTB_PATTERN = re.compile(r"^bcm27\d{2}.*\.dtb$")
 
 # Pi model configurations
 # Note: Pi 3 requires bootcode.bin from TFTP (Pi 4/5 have it in EEPROM)
@@ -69,6 +94,64 @@ def validate_serial(serial: str) -> bool:
         True if valid, False otherwise.
     """
     return bool(SERIAL_PATTERN.match(serial.lower()))
+
+
+def is_pi_boot_file(filename: str) -> bool:
+    """Check if a filename is a known Pi boot file.
+
+    Uses combined detection: checks against known boot files list
+    and DTB pattern matching.
+
+    Args:
+        filename: The filename to check (without path).
+
+    Returns:
+        True if the file is a known Pi boot file.
+    """
+    filename_lower = filename.lower()
+    # Check exact match in known files
+    if filename_lower in PI_BOOT_FILES:
+        return True
+    # Check DTB pattern for any device tree file
+    if DTB_PATTERN.match(filename_lower):
+        return True
+    return False
+
+
+def is_pi_serial_request(path: str) -> tuple[bool, str, str]:
+    """Check if a TFTP path looks like a Pi serial number request.
+
+    Pi network boot requests files with paths like:
+    - /<serial>/start4.elf
+    - /<serial>/bootcode.bin
+    - /<serial>/config.txt
+
+    Uses combined detection: path must have 8-hex-char directory
+    AND the file must be a known Pi boot file.
+
+    Args:
+        path: The TFTP request path.
+
+    Returns:
+        Tuple of (is_pi_request, serial_number, filename).
+        If not a Pi request, serial_number and filename are empty strings.
+    """
+    # Normalize path and split
+    path = path.lstrip("/")
+    parts = path.split("/")
+
+    # Must have at least serial/filename
+    if len(parts) < 2:
+        return (False, "", "")
+
+    potential_serial = parts[0].lower()
+    filename = parts[-1]
+
+    # Combined check: valid serial pattern AND known boot file
+    if validate_serial(potential_serial) and is_pi_boot_file(filename):
+        return (True, potential_serial, filename)
+
+    return (False, "", "")
 
 
 class PiManager:
@@ -559,3 +642,195 @@ class PiManager:
         cmdline_path = node_dir / "cmdline.txt"
         cmdline_path.write_text(cmdline_txt)
         logger.info(f"Updated cmdline.txt for node {serial} with state: {state}")
+
+
+class PiDiscoveryManager:
+    """Manages the Pi discovery directory for unknown Pi devices.
+
+    When a Pi with an unknown serial number attempts to network boot,
+    PureBoot serves files from the discovery directory instead. This
+    allows the Pi to boot into a discovery environment that registers
+    itself with the PureBoot controller.
+    """
+
+    def __init__(
+        self,
+        discovery_dir: Path,
+        firmware_dir: Path,
+        deploy_dir: Path,
+        default_model: str = "pi4",
+        controller_url: Optional[str] = None,
+    ):
+        """Initialize PiDiscoveryManager.
+
+        Args:
+            discovery_dir: Directory for discovery boot files.
+            firmware_dir: Directory containing Pi firmware files.
+            deploy_dir: Directory containing deploy kernel and initramfs.
+            default_model: Default Pi model to assume (affects firmware selection).
+            controller_url: PureBoot controller URL for registration.
+        """
+        self.discovery_dir = Path(discovery_dir).resolve()
+        self.firmware_dir = Path(firmware_dir).resolve()
+        self.deploy_dir = Path(deploy_dir).resolve()
+        self.default_model = default_model
+        self.controller_url = controller_url
+
+        logger.info(
+            f"PiDiscoveryManager initialized: discovery={self.discovery_dir}, "
+            f"default_model={self.default_model}"
+        )
+
+    def ensure_discovery_directory(self) -> Path:
+        """Create and populate the discovery directory if it doesn't exist.
+
+        The discovery directory contains files needed for any Pi to boot
+        into a discovery/registration environment. It includes firmware
+        files for both Pi 3 and Pi 4/5 models.
+
+        Returns:
+            Path to the discovery directory.
+        """
+        if self.discovery_dir.exists():
+            logger.debug(f"Discovery directory already exists: {self.discovery_dir}")
+            return self.discovery_dir
+
+        self.discovery_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Creating Pi discovery directory: {self.discovery_dir}")
+
+        # Symlink firmware files for Pi 3 (bootcode.bin, start.elf, fixup.dat)
+        pi3_files = ["bootcode.bin", "start.elf", "fixup.dat"]
+        for firmware_file in pi3_files:
+            src = self.firmware_dir / firmware_file
+            dst = self.discovery_dir / firmware_file
+            if src.exists() and not dst.exists():
+                dst.symlink_to(src)
+                logger.debug(f"Created symlink: {dst} -> {src}")
+
+        # Symlink firmware files for Pi 4/5 (start4.elf, fixup4.dat)
+        pi4_files = ["start4.elf", "fixup4.dat"]
+        for firmware_file in pi4_files:
+            src = self.firmware_dir / firmware_file
+            dst = self.discovery_dir / firmware_file
+            if src.exists() and not dst.exists():
+                dst.symlink_to(src)
+                logger.debug(f"Created symlink: {dst} -> {src}")
+
+        # Symlink all DTB files for broad model support
+        for dtb_file in self.firmware_dir.glob("*.dtb"):
+            dst = self.discovery_dir / dtb_file.name
+            if not dst.exists():
+                dst.symlink_to(dtb_file)
+                logger.debug(f"Created symlink: {dst} -> {dtb_file}")
+
+        # Symlink deploy files (kernel and initramfs)
+        deploy_files = ["kernel8.img", "initramfs.img"]
+        for deploy_file in deploy_files:
+            src = self.deploy_dir / deploy_file
+            dst = self.discovery_dir / deploy_file
+            if src.exists() and not dst.exists():
+                dst.symlink_to(src)
+                logger.debug(f"Created symlink: {dst} -> {src}")
+
+        # Generate config.txt for discovery mode
+        config_txt = self._generate_discovery_config()
+        config_path = self.discovery_dir / "config.txt"
+        config_path.write_text(config_txt)
+        logger.debug(f"Created config.txt: {config_path}")
+
+        # Generate cmdline.txt for discovery mode
+        cmdline_txt = self._generate_discovery_cmdline()
+        cmdline_path = self.discovery_dir / "cmdline.txt"
+        cmdline_path.write_text(cmdline_txt)
+        logger.debug(f"Created cmdline.txt: {cmdline_path}")
+
+        logger.info(f"Pi discovery directory created successfully")
+        return self.discovery_dir
+
+    def _generate_discovery_config(self) -> str:
+        """Generate config.txt for discovery boot.
+
+        Returns:
+            config.txt content compatible with Pi 3, 4, and 5.
+        """
+        lines = [
+            "# PureBoot Discovery Mode config.txt",
+            "# This configuration supports Pi 3, 4, and 5 models",
+            "",
+            "# Boot configuration",
+            "arm_64bit=1",
+            "",
+            "# Kernel",
+            "kernel=kernel8.img",
+            "initramfs initramfs.img followkernel",
+            "",
+            "# UART console (for debugging)",
+            "enable_uart=1",
+            "uart_2ndstage=1",
+            "",
+            "# GPU memory (minimal for headless)",
+            "gpu_mem=16",
+            "",
+            "# Fast boot",
+            "disable_splash=1",
+            "boot_delay=0",
+        ]
+        return "\n".join(lines) + "\n"
+
+    def _generate_discovery_cmdline(self) -> str:
+        """Generate cmdline.txt for discovery boot.
+
+        The discovery cmdline includes pureboot.mode=discovery to indicate
+        the deploy environment should register this Pi with the controller.
+
+        Returns:
+            cmdline.txt content as single line.
+        """
+        params = [
+            # Console on serial UART
+            "console=serial0,115200",
+            "console=tty1",
+            # Network configuration via DHCP
+            "ip=dhcp",
+            # PureBoot discovery mode
+            "pureboot.mode=discovery",
+            "pureboot.state=discovered",
+        ]
+
+        if self.controller_url:
+            params.append(f"pureboot.url={self.controller_url}")
+
+        # Root filesystem (initramfs)
+        params.extend([
+            "root=/dev/ram0",
+            "rootfstype=ramfs",
+        ])
+
+        # Boot quietly but show errors
+        params.extend([
+            "quiet",
+            "loglevel=4",
+        ])
+
+        return " ".join(params) + "\n"
+
+    def get_discovery_path(self) -> Path:
+        """Get the path to the discovery directory.
+
+        Returns:
+            Path to the discovery directory.
+        """
+        return self.discovery_dir
+
+    def update_controller_url(self, controller_url: str) -> None:
+        """Update the controller URL in the discovery cmdline.txt.
+
+        Args:
+            controller_url: New controller URL.
+        """
+        self.controller_url = controller_url
+        cmdline_txt = self._generate_discovery_cmdline()
+        cmdline_path = self.discovery_dir / "cmdline.txt"
+        if cmdline_path.parent.exists():
+            cmdline_path.write_text(cmdline_txt)
+            logger.info(f"Updated discovery cmdline.txt with URL: {controller_url}")

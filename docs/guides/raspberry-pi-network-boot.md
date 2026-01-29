@@ -143,9 +143,69 @@ class PiSettings(BaseSettings):
     nodes_dir: str = "/srv/tftp/pi-nodes"
 ```
 
+## Auto-Discovery (No Pre-Registration Required)
+
+PureBoot supports automatic discovery of unknown Pi devices. When a Pi with an unregistered serial number attempts to network boot, PureBoot serves boot files from a discovery directory instead of rejecting the request.
+
+### How It Works
+
+1. **Unknown Pi boots** - TFTP request comes in with path `/<serial>/start4.elf`
+2. **PureBoot detects Pi request** - Combined detection: 8-hex-char serial + known boot file
+3. **Fallback to discovery directory** - Since serial isn't registered, PureBoot serves from `/tftp/pi-discovery/`
+4. **Pi boots into discovery environment** - cmdline.txt includes `pureboot.mode=discovery`
+5. **Deploy environment registers Pi** - Calls `/api/v1/boot/pi?mode=discovery&serial=...`
+6. **PureBoot creates node directory** - `/tftp/pi-nodes/<serial>/` is created
+7. **Next boot uses registered config** - Subsequent boots use node-specific files
+
+### Configuration
+
+Enable/disable auto-discovery in your settings:
+
+```python
+# src/config/settings.py
+class PiSettings(BaseSettings):
+    discovery_enabled: bool = True  # Enable Pi auto-discovery
+    discovery_dir: Path = Path("./tftp/pi-discovery")
+    discovery_default_model: str = "pi4"  # Assumed model for discovery
+```
+
+Or via environment variables:
+
+```bash
+PUREBOOT_PI__DISCOVERY_ENABLED=true
+PUREBOOT_PI__DISCOVERY_DIR=/srv/tftp/pi-discovery
+PUREBOOT_PI__DISCOVERY_DEFAULT_MODEL=pi4
+```
+
+### Discovery Directory Contents
+
+The discovery directory (`/tftp/pi-discovery/`) is automatically populated with:
+
+```
+/tftp/pi-discovery/
+├── bootcode.bin → ../rpi-firmware/bootcode.bin  # For Pi 3
+├── start.elf → ../rpi-firmware/start.elf        # For Pi 3
+├── start4.elf → ../rpi-firmware/start4.elf      # For Pi 4/5
+├── fixup.dat → ../rpi-firmware/fixup.dat
+├── fixup4.dat → ../rpi-firmware/fixup4.dat
+├── kernel8.img → ../deploy-arm64/kernel8.img
+├── initramfs.img → ../deploy-arm64/initramfs.img
+├── bcm2710-rpi-3-b.dtb → ...
+├── bcm2711-rpi-4-b.dtb → ...
+├── config.txt                                    # Generic config for all models
+└── cmdline.txt                                   # Includes pureboot.mode=discovery
+```
+
+### Benefits
+
+- **Zero pre-configuration** - No need to register Pi serial numbers before first boot
+- **Plug and play** - Connect a new Pi to the network and it registers itself
+- **Model detection** - Pi model is detected during registration and config updated
+- **Secure** - Auto-registration can be disabled if strict control is required
+
 ## Provisioning Workflow
 
-1. **Discovery:** Pi boots, contacts PureBoot, gets registered with serial number
+1. **Discovery:** Pi boots (auto-discovery or pre-registered), contacts PureBoot, gets registered with serial number
 2. **Pending:** Assign a workflow (Ubuntu, Raspberry Pi OS, NFS diskless)
 3. **Installing:** Pi reboots, PureBoot provides install parameters
 4. **Installed:** OS written to storage, Pi reports completion

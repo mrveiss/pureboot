@@ -73,6 +73,11 @@ class PiSettings(BaseSettings):
     deploy_initrd: str = "initramfs.img"
     # Directory for per-node TFTP files (will contain serial number subdirs)
     nodes_dir: Path = Path("./tftp/pi-nodes")
+    # Discovery settings for unknown Pi devices
+    discovery_enabled: bool = True
+    discovery_dir: Path = Path("./tftp/pi-discovery")
+    # Default model to assume for discovery (can be updated after identification)
+    discovery_default_model: str = "pi4"
 
 
 class NFSSettings(BaseSettings):
