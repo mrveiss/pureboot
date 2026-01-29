@@ -373,6 +373,70 @@ SCRIPT
     log_info "Bootloader build complete"
 }
 
+setup_pi_firmware() {
+    # Download Raspberry Pi firmware files for network boot
+    # This enables Pi 3, 4, and 5 to network boot via TFTP
+    log_info "Setting up Raspberry Pi firmware..."
+
+    PI_FIRMWARE_DIR="$INSTALL_DIR/tftp/rpi-firmware"
+    PI_DEPLOY_DIR="$INSTALL_DIR/tftp/deploy-arm64"
+
+    # Create directories
+    mkdir -p "$PI_FIRMWARE_DIR"
+    mkdir -p "$PI_DEPLOY_DIR"
+    mkdir -p "$INSTALL_DIR/tftp/pi-nodes"
+
+    # Check if firmware already exists
+    if [ -f "$PI_FIRMWARE_DIR/bootcode.bin" ] && [ -f "$PI_FIRMWARE_DIR/start4.elf" ]; then
+        log_info "Pi firmware already exists, skipping download"
+    else
+        log_info "Downloading Raspberry Pi firmware from GitHub..."
+
+        # Download firmware files from raspberrypi/firmware repo
+        FIRMWARE_URL="https://github.com/raspberrypi/firmware/raw/master/boot"
+
+        # Pi 3 files (required for Pi 3 network boot)
+        curl -fsSL "$FIRMWARE_URL/bootcode.bin" -o "$PI_FIRMWARE_DIR/bootcode.bin" 2>/dev/null || log_warn "Failed to download bootcode.bin"
+        curl -fsSL "$FIRMWARE_URL/start.elf" -o "$PI_FIRMWARE_DIR/start.elf" 2>/dev/null || log_warn "Failed to download start.elf"
+        curl -fsSL "$FIRMWARE_URL/fixup.dat" -o "$PI_FIRMWARE_DIR/fixup.dat" 2>/dev/null || log_warn "Failed to download fixup.dat"
+
+        # Pi 4/5 files
+        curl -fsSL "$FIRMWARE_URL/start4.elf" -o "$PI_FIRMWARE_DIR/start4.elf" 2>/dev/null || log_warn "Failed to download start4.elf"
+        curl -fsSL "$FIRMWARE_URL/fixup4.dat" -o "$PI_FIRMWARE_DIR/fixup4.dat" 2>/dev/null || log_warn "Failed to download fixup4.dat"
+
+        # Device tree files for common Pi models
+        for dtb in bcm2710-rpi-3-b.dtb bcm2710-rpi-3-b-plus.dtb bcm2710-rpi-cm3.dtb \
+                   bcm2711-rpi-4-b.dtb bcm2711-rpi-400.dtb bcm2711-rpi-cm4.dtb \
+                   bcm2712-rpi-5-b.dtb bcm2712-rpi-500.dtb; do
+            curl -fsSL "$FIRMWARE_URL/$dtb" -o "$PI_FIRMWARE_DIR/$dtb" 2>/dev/null || true
+        done
+
+        if [ -f "$PI_FIRMWARE_DIR/bootcode.bin" ]; then
+            log_info "Pi firmware downloaded successfully"
+        else
+            log_warn "Failed to download Pi firmware - Pi network boot will not work"
+        fi
+    fi
+
+    # Download ARM64 kernel and initramfs for Pi deploy environment
+    if [ -f "$PI_DEPLOY_DIR/kernel8.img" ] && [ -f "$PI_DEPLOY_DIR/initramfs.img" ]; then
+        log_info "Pi deploy files already exist, skipping download"
+    else
+        log_info "Downloading ARM64 deploy environment (Alpine Linux)..."
+
+        # Alpine Linux ARM64 netboot files work well for Pi deploy environment
+        ALPINE_URL="https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/netboot"
+        curl -fsSL "$ALPINE_URL/vmlinuz-lts" -o "$PI_DEPLOY_DIR/kernel8.img" 2>/dev/null || log_warn "Failed to download kernel8.img"
+        curl -fsSL "$ALPINE_URL/initramfs-lts" -o "$PI_DEPLOY_DIR/initramfs.img" 2>/dev/null || log_warn "Failed to download initramfs.img"
+
+        if [ -f "$PI_DEPLOY_DIR/kernel8.img" ]; then
+            log_info "Pi deploy environment downloaded successfully"
+        else
+            log_warn "Failed to download Pi deploy environment - Pi provisioning will not work"
+        fi
+    fi
+}
+
 copy_application_files() {
     log_info "Copying application files..."
 
@@ -471,6 +535,7 @@ do_install() {
     create_directories
     install_bootloaders
     build_custom_bootloaders
+    setup_pi_firmware
     copy_application_files
     setup_venv
     install_python_deps
@@ -556,6 +621,7 @@ do_update() {
     mkdir -p "$INSTALL_DIR/certs"
     mkdir -p /var/lib/pureboot/workflows
 
+    setup_pi_firmware
     copy_application_files
     install_python_deps
     build_frontend
