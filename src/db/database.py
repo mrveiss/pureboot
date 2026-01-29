@@ -41,11 +41,16 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db() -> None:
-    """Initialize database tables."""
+    """Initialize database tables and run migrations."""
     from src.db.models import Base
+    from src.db.migrations import run_migrations
 
     async with engine.begin() as conn:
+        # Create any new tables
         await conn.run_sync(Base.metadata.create_all)
+
+        # Run migrations for existing tables (add missing columns)
+        await run_migrations(conn)
 
 
 async def close_db() -> None:
