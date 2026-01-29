@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -1010,9 +1011,6 @@ class NodeCommandResponse(BaseModel):
     node_id: str
     pending_command: str | None
     message: str
-
-
-from pydantic import BaseModel, Field
 
 
 @router.post("/nodes/{node_id}/command", response_model=ApiResponse[NodeCommandResponse])
