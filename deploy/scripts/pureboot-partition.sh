@@ -114,12 +114,14 @@ report_disk_info() {
     fi
 
     # Build report payload
+    # The scan output is {"disks": [...]} - extract the disks array for the API
+    local disks_array
+    disks_array=$(echo "${scan_output}" | jq -c '.disks // []')
+
     local report_data
     report_data=$(cat << EOF
 {
-    "node_id": "${PUREBOOT_NODE_ID}",
-    "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-    "scan_result": ${scan_output}
+    "disks": ${disks_array}
 }
 EOF
 )

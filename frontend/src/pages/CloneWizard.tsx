@@ -25,10 +25,21 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui'
-import { useNodes, useStorageBackends, useCreateCloneSession } from '@/hooks'
+import { useNodes, useStorageBackends, useCreateCloneSession, useNodeDisks } from '@/hooks'
 import type { CloneMode, ResizeMode } from '@/types/clone'
 import type { StorageBackend } from '@/types/storage'
 import { cn } from '@/lib/utils'
+
+/**
+ * Format bytes to human-readable string.
+ */
+function formatSize(bytes: number): string {
+  if (bytes >= 1024 ** 4) return `${(bytes / 1024 ** 4).toFixed(1)} TB`
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${bytes} B`
+}
 
 /**
  * Clone Mode option card component
@@ -95,8 +106,8 @@ export function CloneWizard() {
   const [name, setName] = useState('')
   const [sourceNodeId, setSourceNodeId] = useState('')
   const [targetNodeId, setTargetNodeId] = useState('')
-  const [sourceDevice, setSourceDevice] = useState('/dev/sda')
-  const [targetDevice, setTargetDevice] = useState('/dev/sda')
+  const [sourceDevice, setSourceDevice] = useState('')
+  const [targetDevice, setTargetDevice] = useState('')
   const [cloneMode, setCloneMode] = useState<CloneMode>('direct')
   const [stagingBackendId, setStagingBackendId] = useState('')
   const [resizeMode, setResizeMode] = useState<ResizeMode>('none')
@@ -105,6 +116,10 @@ export function CloneWizard() {
   const { data: nodesResponse, isLoading: nodesLoading } = useNodes()
   const { data: backendsResponse, isLoading: backendsLoading } = useStorageBackends()
   const createSession = useCreateCloneSession()
+
+  // Fetch disks for source and target nodes
+  const { data: sourceDisks = [], isLoading: sourceDisksLoading } = useNodeDisks(sourceNodeId || undefined)
+  const { data: targetDisks = [], isLoading: targetDisksLoading } = useNodeDisks(targetNodeId || undefined)
 
   const nodes = nodesResponse?.data ?? []
   const storageBackends = backendsResponse?.data ?? []
@@ -126,11 +141,13 @@ export function CloneWizard() {
   // Validation
   const isValid = useMemo(() => {
     if (!sourceNodeId) return false
+    if (!sourceDevice) return false // Must select a source disk
     if (isSameNode) return false
     if (cloneMode === 'staged' && !stagingBackendId) return false
     if (cloneMode === 'direct' && !targetNodeId) return false
+    if (targetNodeId && !targetDevice) return false // If target node selected, must select disk
     return true
-  }, [sourceNodeId, targetNodeId, isSameNode, cloneMode, stagingBackendId])
+  }, [sourceNodeId, sourceDevice, targetNodeId, targetDevice, isSameNode, cloneMode, stagingBackendId])
 
   // Handle form submission
   const handleSubmit = async () => {
@@ -334,13 +351,52 @@ export function CloneWizard() {
                   <HardDrive className="h-3 w-3 inline mr-1" />
                   Source Device
                 </Label>
-                <Input
-                  id="source-device"
-                  value={sourceDevice}
-                  onChange={(e) => setSourceDevice(e.target.value)}
-                  placeholder="/dev/sda"
-                  className="mt-1.5 font-mono"
-                />
+                {!sourceNodeId ? (
+                  <p className="text-sm text-muted-foreground mt-1.5">
+                    Select a source node first
+                  </p>
+                ) : sourceDisksLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1.5">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Loading disks...
+                  </div>
+                ) : sourceDisks.length === 0 ? (
+                  <div className="mt-1.5 text-sm text-yellow-600 bg-yellow-500/10 p-2 rounded-md">
+                    <AlertTriangle className="h-3 w-3 inline mr-1" />
+                    No disks found. Open{' '}
+                    <Link
+                      to={`/nodes/${sourceNodeId}/partitions`}
+                      className="underline"
+                    >
+                      Partition Manager
+                    </Link>{' '}
+                    and click "Scan Disks".
+                  </div>
+                ) : (
+                  <Select value={sourceDevice} onValueChange={setSourceDevice}>
+                    <SelectTrigger id="source-device" className="mt-1.5 font-mono">
+                      <SelectValue placeholder="Select disk" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sourceDisks.map((disk) => (
+                        <SelectItem key={disk.device} value={disk.device}>
+                          <div className="flex items-center gap-2">
+                            <HardDrive className="h-3 w-3" />
+                            <span className="font-mono">{disk.device}</span>
+                            <span className="text-muted-foreground">
+                              ({formatSize(disk.size_bytes)})
+                            </span>
+                            {disk.model && (
+                              <span className="text-xs text-muted-foreground">
+                                - {disk.model}
+                              </span>
+                            )}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
             </div>
 
@@ -390,13 +446,52 @@ export function CloneWizard() {
                   <HardDrive className="h-3 w-3 inline mr-1" />
                   Target Device
                 </Label>
-                <Input
-                  id="target-device"
-                  value={targetDevice}
-                  onChange={(e) => setTargetDevice(e.target.value)}
-                  placeholder="/dev/sda"
-                  className="mt-1.5 font-mono"
-                />
+                {!targetNodeId ? (
+                  <p className="text-sm text-muted-foreground mt-1.5">
+                    Select a target node first
+                  </p>
+                ) : targetDisksLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1.5">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Loading disks...
+                  </div>
+                ) : targetDisks.length === 0 ? (
+                  <div className="mt-1.5 text-sm text-yellow-600 bg-yellow-500/10 p-2 rounded-md">
+                    <AlertTriangle className="h-3 w-3 inline mr-1" />
+                    No disks found. Open{' '}
+                    <Link
+                      to={`/nodes/${targetNodeId}/partitions`}
+                      className="underline"
+                    >
+                      Partition Manager
+                    </Link>{' '}
+                    and click "Scan Disks".
+                  </div>
+                ) : (
+                  <Select value={targetDevice} onValueChange={setTargetDevice}>
+                    <SelectTrigger id="target-device" className="mt-1.5 font-mono">
+                      <SelectValue placeholder="Select disk" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {targetDisks.map((disk) => (
+                        <SelectItem key={disk.device} value={disk.device}>
+                          <div className="flex items-center gap-2">
+                            <HardDrive className="h-3 w-3" />
+                            <span className="font-mono">{disk.device}</span>
+                            <span className="text-muted-foreground">
+                              ({formatSize(disk.size_bytes)})
+                            </span>
+                            {disk.model && (
+                              <span className="text-xs text-muted-foreground">
+                                - {disk.model}
+                              </span>
+                            )}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
             </div>
           </div>
