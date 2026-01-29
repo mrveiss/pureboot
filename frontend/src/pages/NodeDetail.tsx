@@ -21,7 +21,7 @@ import {
   SelectItem,
 } from '@/components/ui'
 import { StateMachine } from '@/components/nodes/StateMachine'
-import { useNode, useUpdateNodeState, useUpdateNode, useWorkflows, useSendNodeCommand, useTriggerDiskScan } from '@/hooks'
+import { useNode, useUpdateNodeState, useUpdateNode, useWorkflows, useSendNodeCommand } from '@/hooks'
 import { NODE_STATE_COLORS, NODE_STATE_LABELS, NODE_STATE_TRANSITIONS, ARCHITECTURE_LABELS, BOOT_MODE_LABELS, type NodeState } from '@/types'
 import { cn } from '@/lib/utils'
 
@@ -36,7 +36,6 @@ export function NodeDetail() {
   const updateState = useUpdateNodeState()
   const updateNode = useUpdateNode()
   const sendCommand = useSendNodeCommand()
-  const triggerScan = useTriggerDiskScan()
   const { data: workflowsResponse } = useWorkflows()
 
   const [workflowDialogOpen, setWorkflowDialogOpen] = useState(false)
@@ -150,7 +149,7 @@ export function NodeDetail() {
   }
 
   const handleRescan = () => {
-    triggerScan.mutate(node.id)
+    sendCommand.mutate({ nodeId: node.id, command: 'rescan' })
   }
 
   const currentWorkflow = workflows.find((w) => w.id === node.workflow_id)
@@ -474,9 +473,9 @@ export function NodeDetail() {
                   <Button
                     variant="outline"
                     onClick={handleRescan}
-                    disabled={triggerScan.isPending}
+                    disabled={sendCommand.isPending}
                   >
-                    <RefreshCw className={cn("mr-2 h-4 w-4", triggerScan.isPending && "animate-spin")} />
+                    <RefreshCw className={cn("mr-2 h-4 w-4", sendCommand.isPending && "animate-spin")} />
                     Scan
                   </Button>
                   <Button
