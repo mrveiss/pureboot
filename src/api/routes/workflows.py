@@ -22,7 +22,7 @@ class WorkflowStepCreate(BaseModel):
 
     sequence: int = Field(..., ge=1, description="Step execution order (1-based)")
     name: str = Field(..., min_length=1, max_length=255)
-    type: Literal["boot", "script", "reboot", "wait", "cloud_init"] = Field(
+    type: Literal["boot", "script", "reboot", "wait", "cloud_init", "disk_scan", "partition"] = Field(
         ..., description="Step type"
     )
     config: dict | None = Field(None, description="Step configuration")

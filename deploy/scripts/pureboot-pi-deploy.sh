@@ -20,6 +20,30 @@ pi_network_up || {
     exit 1
 }
 
+# Automatic disk scan - always scan disks on boot to report available storage
+log "Scanning disks..."
+if [[ -x /usr/local/bin/pureboot-disk-scan.sh ]]; then
+    DISK_SCAN_OUTPUT=$(/usr/local/bin/pureboot-disk-scan.sh 2>/dev/null)
+    if [[ $? -eq 0 && -n "${DISK_SCAN_OUTPUT}" ]]; then
+        # Report disk info to controller
+        if [[ -n "${PUREBOOT_SERVER}" && -n "${PUREBOOT_NODE_ID}" ]]; then
+            DISKS_ARRAY=$(echo "${DISK_SCAN_OUTPUT}" | jq -c '.disks // []')
+            REPORT_DATA="{\"disks\": ${DISKS_ARRAY}}"
+            ENDPOINT="/api/v1/nodes/${PUREBOOT_NODE_ID}/disks/report"
+            if api_post "${ENDPOINT}" "${REPORT_DATA}"; then
+                log "Disk information reported to controller"
+            else
+                log_warn "Failed to report disk info, will retry later"
+            fi
+        fi
+    else
+        log_warn "Disk scan failed or returned no data"
+    fi
+else
+    log_warn "Disk scan script not found, skipping"
+fi
+log ""
+
 # If we have a server URL, fetch instructions from API
 if [[ -n "${PUREBOOT_SERVER}" ]]; then
     log "Fetching boot instructions from controller..."
