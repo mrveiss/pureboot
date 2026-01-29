@@ -36,6 +36,7 @@ from src.db.database import init_db, close_db, async_session_factory
 from src.config import settings
 from src.pxe.tftp_server import TFTPServer
 from src.pxe.dhcp_proxy import DHCPProxy
+from src.pxe.ipxe_scripts import update_tftp_boot_scripts
 from sqlalchemy import select
 from src.core.scheduler import sync_scheduler
 from src.core.escalation_job import process_escalations
@@ -80,6 +81,16 @@ async def lifespan(app: FastAPI):
     (tftp_root / "bios").mkdir(exist_ok=True)
     (tftp_root / "uefi").mkdir(exist_ok=True)
 
+    # Detect server IP for boot scripts
+    server_ip = settings.host
+    if server_ip == "0.0.0.0":
+        server_ip = get_primary_ip()
+        logger.info(f"Auto-detected server IP: {server_ip}")
+
+    # Update TFTP boot scripts with current server address
+    server_address = f"{server_ip}:{settings.port}"
+    update_tftp_boot_scripts(tftp_root, server_address)
+
     # Start TFTP server if enabled
     if settings.tftp.enabled:
         tftp_server = TFTPServer(
@@ -98,18 +109,9 @@ async def lifespan(app: FastAPI):
 
     # Start Proxy DHCP if enabled
     if settings.dhcp_proxy.enabled:
-        # Auto-detect server IP if host is 0.0.0.0 (bind-all)
-        # DHCP proxy needs actual IP to tell clients where to connect
-        server_ip = settings.host
-        if server_ip == "0.0.0.0":
-            server_ip = get_primary_ip()
-            logger.info(f"Auto-detected server IP: {server_ip}")
-
+        # Use already-detected server_ip for DHCP proxy
         tftp_addr = settings.dhcp_proxy.tftp_server or server_ip
-        http_addr = (
-            settings.dhcp_proxy.http_server
-            or f"{server_ip}:{settings.port}"
-        )
+        http_addr = settings.dhcp_proxy.http_server or server_address
         dhcp_proxy = DHCPProxy(
             tftp_server=tftp_addr,
             http_server=http_addr,
