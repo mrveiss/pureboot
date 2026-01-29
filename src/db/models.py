@@ -166,6 +166,9 @@ class Node(Base):
     last_install_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     state_changed_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
+    # Disk scan request (set when UI requests scan, cleared after agent reports)
+    disk_scan_requested_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
     # State log relationship
     state_logs: Mapped[list["NodeStateLog"]] = relationship(
         back_populates="node", cascade="all, delete-orphan"

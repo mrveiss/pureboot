@@ -110,6 +110,10 @@ async def trigger_disk_scan(
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
 
+    # Set scan requested timestamp for agent polling
+    node.disk_scan_requested_at = datetime.now(timezone.utc)
+    await db.flush()
+
     # Broadcast scan request event - the node agent will pick this up
     await global_ws_manager.broadcast(
         "partition.scan_requested",
@@ -125,6 +129,34 @@ async def trigger_disk_scan(
             "status": "scan_requested",
         },
         message="Disk scan requested. Node will report results on next poll.",
+    )
+
+
+@router.get("/nodes/{node_id}/disks/scan-status", response_model=ApiResponse[dict])
+async def check_scan_status(
+    node_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Check if a disk scan has been requested for a node.
+
+    This endpoint is polled by node agents to check if they should perform
+    a disk scan. Returns scan_requested=true if a scan is pending.
+    """
+    # Verify node exists
+    result = await db.execute(select(Node).where(Node.id == node_id))
+    node = result.scalar_one_or_none()
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    scan_requested = node.disk_scan_requested_at is not None
+
+    return ApiResponse(
+        data={
+            "node_id": node_id,
+            "scan_requested": scan_requested,
+            "requested_at": node.disk_scan_requested_at.isoformat() if node.disk_scan_requested_at else None,
+        },
     )
 
 
@@ -226,6 +258,9 @@ async def receive_disk_report(
             )
             db.add(disk)
             created_count += 1
+
+    # Clear the scan requested flag since we've received the report
+    node.disk_scan_requested_at = None
 
     await db.flush()
 

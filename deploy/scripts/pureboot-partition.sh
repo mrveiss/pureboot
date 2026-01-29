@@ -138,6 +138,40 @@ EOF
     fi
 }
 
+# Check if a disk scan has been requested
+# Usage: if check_scan_requested; then report_disk_info; fi
+check_scan_requested() {
+    local endpoint="/api/v1/nodes/${PUREBOOT_NODE_ID}/disks/scan-status"
+    local url="${PUREBOOT_SERVER}${endpoint}"
+    local response
+
+    log_debug "Checking for scan request: ${url}"
+
+    # Make GET request
+    response=$(curl -sf \
+        --connect-timeout 10 \
+        --max-time 30 \
+        "${url}" 2>/dev/null)
+
+    local curl_exit=$?
+
+    if [[ ${curl_exit} -ne 0 ]]; then
+        log_debug "Scan status check failed with curl exit code: ${curl_exit}"
+        return 1
+    fi
+
+    # Check if scan_requested is true
+    local scan_requested
+    scan_requested=$(echo "${response}" | jq -r '.data.scan_requested // false')
+
+    if [[ "${scan_requested}" == "true" ]]; then
+        log "Disk scan requested by controller"
+        return 0
+    fi
+
+    return 1
+}
+
 # Poll controller for pending partition operations
 # Usage: operations_json=$(poll_operations)
 poll_operations() {
@@ -376,6 +410,11 @@ main_loop() {
 
         # Try to flush any queued updates
         flush_queue
+
+        # Check if a disk scan has been requested
+        if check_scan_requested; then
+            report_disk_info
+        fi
 
         # Poll for pending operations
         local pending_ops
